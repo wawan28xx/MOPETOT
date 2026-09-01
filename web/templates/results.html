@@ -1,0 +1,2397 @@
+{% extends "base.html" %}
+{% block title %}Results #{{ scan.id }} - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div class="results-page">
+    <div class="results-header">
+        <div>
+            <h1>{{ scan.filename }}</h1>
+            <p class="subtitle">
+                <span class="badge badge-{{ scan.platform }}">{{ scan.platform|upper }}</span>
+                {{ scan.package_name or 'Unknown package' }}
+                {% if scan.version %}
+                <span class="version-tag">v{{ scan.version }}</span>
+                {% endif %}
+            </p>
+        </div>
+        <div class="results-actions">
+            <a href="/report/{{ scan.id }}" class="btn btn-sm">Download .md</a>
+        </div>
+    </div>
+
+    <!-- 7 TABS NAVIGATION -->
+    <div class="tabs">
+        <button class="tab active" data-tab="1" onclick="showTab(1)">
+            <span>📊 Overview</span>
+        </button>
+        <button class="tab" data-tab="2" onclick="showTab(2)">
+            <span>📱 Components &amp; IPC</span>
+            <span class="tab-badge" id="tab-2-badge">-</span>
+        </button>
+        <button class="tab" data-tab="3" onclick="showTab(3)">
+            <span>🔑 Secrets &amp; Keys</span>
+            <span class="tab-badge" id="tab-3-badge">-</span>
+        </button>
+        <button class="tab" data-tab="4" onclick="showTab(4)">
+            <span>🌐 Network &amp; IPs</span>
+            <span class="tab-badge" id="tab-4-badge">-</span>
+        </button>
+        <button class="tab" data-tab="5" onclick="showTab(5)">
+            <span>🛡️ Vuln Findings</span>
+            <span class="tab-badge" id="tab-5-badge">-</span>
+        </button>
+        <button class="tab" data-tab="6" onclick="showTab(6)">
+            <span>⚡ Live Verifier</span>
+            <span class="tab-badge" id="tab-6-badge">-</span>
+        </button>
+        <button class="tab" data-tab="7" onclick="showTab(7)">
+            <span>📜 Logs</span>
+            <span class="tab-badge">{{ logs|length if logs else 0 }}</span>
+        </button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW -->
+    <div class="tab-pane active" id="tab-1-content">
+        <div class="tab-loading" id="tab-1-loading">
+            <div class="spinner-text">Memuat ringkasan overview...</div>
+        </div>
+        <div class="tab-data" id="tab-1-data" style="display:none"></div>
+
+        <!-- FULL REPORT DETAIL -->
+        {% if report_html %}
+        <div class="section-block" style="margin-top:24px;">
+            <div class="section-title-static" onclick="toggleReportDetail()" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                <span style="display:flex; align-items:center; gap:8px;">
+                    📄 <strong>Laporan Audit Lengkap (Full Report .md)</strong>
+                </span>
+                <button class="btn btn-sm btn-primary" id="btn-toggle-report" onclick="event.stopPropagation(); toggleReportDetail();">
+                    🔍 Klik Detail Laporan ▼
+                </button>
+            </div>
+            <div id="full-report-wrapper" style="display:none; padding:20px; background:var(--bg-card); border-top:1px solid var(--border);">
+                <div class="filter-bar" style="margin-bottom:16px;">
+                    <input type="text" id="search-input" placeholder="Search in report..." oninput="filterReport()" class="filter-search">
+                    <button class="btn btn-sm" onclick="expandAll()">Expand All</button>
+                    <button class="btn btn-sm" onclick="collapseAll()">Collapse All</button>
+                </div>
+                <div class="report-content" id="report-content">
+                    {{ report_html|safe }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- TAB 2: COMPONENTS & IPC -->
+    <div class="tab-pane" id="tab-2-content" style="display:none">
+        <div class="tab-loading" id="tab-2-loading">
+            <div class="spinner-text">Memuat komponen &amp; deep links...</div>
+        </div>
+        <div class="tab-data" id="tab-2-data" style="display:none"></div>
+    </div>
+
+    <!-- TAB 3: SECRETS & KEYS -->
+    <div class="tab-pane" id="tab-3-content" style="display:none">
+        <div class="tab-loading" id="tab-3-loading">
+            <div class="spinner-text">Memuat hardcoded secrets...</div>
+        </div>
+        <div class="tab-data" id="tab-3-data" style="display:none"></div>
+    </div>
+
+    <!-- TAB 4: NETWORK & IPS -->
+    <div class="tab-pane" id="tab-4-content" style="display:none">
+        <div class="tab-loading" id="tab-4-loading">
+            <div class="spinner-text">Memuat endpoints &amp; IP address...</div>
+        </div>
+        <div class="tab-data" id="tab-4-data" style="display:none"></div>
+    </div>
+
+    <!-- TAB 5: VULN FINDINGS -->
+    <div class="tab-pane" id="tab-5-content" style="display:none">
+        <div class="tab-loading" id="tab-5-loading">
+            <div class="spinner-text">Memuat temuan keamanan...</div>
+        </div>
+        <div class="tab-data" id="tab-5-data" style="display:none"></div>
+    </div>
+
+    <!-- TAB 6: LIVE VERIFIER -->
+    <div class="tab-pane" id="tab-6-content" style="display:none">
+        <div class="tab-loading" id="tab-6-loading">
+            <div class="spinner-text">Memuat data live verifier...</div>
+        </div>
+        <div class="tab-data" id="tab-6-data" style="display:none"></div>
+    </div>
+
+    <!-- TAB 7: LOGS -->
+    <div class="tab-pane" id="tab-7-content" style="display:none">
+        {% if logs %}
+        <div class="section-block" style="margin-top:0">
+            <div class="section-title-static">
+                <span>Scan Logs</span>
+                <span class="section-count">{{ logs|length }}</span>
+            </div>
+            <div class="log-container" style="max-height:600px">
+                {% for log in logs %}
+                <div class="log-entry log-{{ log.level }}">
+                    <span class="log-time">{{ log.timestamp[:19] if log.timestamp else '' }}</span>
+                    <span class="log-level">[{{ log.level|upper }}]</span>
+                    <span class="log-message">{{ log.message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>Tidak ada log tersedia.</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ============================================================
+     SOURCE CODE CONTEXT POPUP MODAL (±5 BARIS)
+     ============================================================ -->
+<div id="ctx-modal" class="ctx-modal-overlay" style="display:none" onclick="closeCtxModal(event)">
+    <div class="ctx-modal-box">
+        <div class="ctx-modal-header">
+            <div>
+                <div class="ctx-modal-title" id="ctx-title">Source Context</div>
+                <div class="ctx-modal-file" id="ctx-file"></div>
+            </div>
+            <button class="ctx-close-btn" onclick="closeCtxModalDirect()" title="Tutup">&times;</button>
+        </div>
+        <div class="ctx-modal-body">
+            <div class="ctx-code-wrapper">
+                <div id="ctx-code-inner"></div>
+            </div>
+        </div>
+        <div class="ctx-modal-footer">
+            <span id="ctx-rule-label" class="ctx-rule-chip"></span>
+            <span id="ctx-severity-label" class="ctx-sev-chip"></span>
+            <span id="ctx-match-label" class="ctx-match-preview"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     LIVE VERIFIER RESULT DETAILS POPUP MODAL
+     ============================================================ -->
+<div id="verify-modal" class="ctx-modal-overlay" style="display:none" onclick="closeVerifyModal(event)">
+    <div class="ctx-modal-box" style="max-width:920px;">
+        <div class="ctx-modal-header">
+            <div>
+                <div class="ctx-modal-title" id="verify-modal-title">Live Verification Response</div>
+                <div class="ctx-modal-file" id="verify-modal-target"></div>
+            </div>
+            <button class="ctx-close-btn" onclick="closeVerifyModalDirect()" title="Tutup">&times;</button>
+        </div>
+        <div class="ctx-modal-body" style="padding:20px; background:var(--bg-card); max-height:75vh; overflow-y:auto;">
+            <div id="verify-modal-content"></div>
+        </div>
+        <div class="ctx-modal-footer">
+            <span id="verify-modal-verdict" class="ctx-sev-chip"></span>
+            <button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="closeVerifyModalDirect()">Tutup</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const SCAN_ID = {{ scan.id }};
+window._secretsData = {};
+window._verifyResultsData = {};
+window._verifyPersistentCache = {};
+window._verifyCacheLoaded = false;
+window._liveVerifierRenderedOnce = false;
+window._verifyRowLookup = {};
+window._pocState = {
+    payload: null,
+    loading: false,
+    generated: false,
+    loadedFromCache: false,
+    initialized: false
+};
+window._liveVerifierCandidates = {
+    firebase: [],
+    googleKeys: [],
+    endpoints: [],
+    ips: []
+};
+
+let globalScanData = null;
+let globalSecrets = [];
+let globalFindings = [];
+let globalEndpoints = [];
+let isDataLoaded = false;
+let currentTabNumber = 1;
+
+/* ---------------------------------------------------------------
+   TAB SWITCHING
+--------------------------------------------------------------- */
+function showTab(n) {
+    currentTabNumber = n;
+
+    document.querySelectorAll('.tab-pane').forEach(function(p) {
+        p.style.display = 'none';
+        p.classList.remove('active');
+    });
+
+    document.querySelectorAll('.tabs .tab').forEach(function(b) {
+        b.classList.remove('active');
+    });
+
+    const pane = document.getElementById('tab-' + n + '-content');
+    if (pane) {
+        pane.style.display = 'block';
+        pane.classList.add('active');
+    }
+
+    const btn = document.querySelector('.tabs .tab[data-tab="' + n + '"]');
+    if (btn) {
+        btn.classList.add('active');
+    }
+
+    if (isDataLoaded) {
+        if (n === 6 && window._liveVerifierRenderedOnce) {
+            showTabData(6);
+            rehydrateVerifierUI();
+        } else {
+            loadTabContent(n);
+        }
+    }
+}
+
+function loadTabContent(n) {
+    if (n === 1) loadOverview();
+    else if (n === 2) loadComponents();
+    else if (n === 3) loadSecrets();
+    else if (n === 4) loadNetwork();
+    else if (n === 5) loadFindings();
+    else if (n === 6) loadLiveVerifier();
+}
+
+function showTabData(n) {
+    const loader = document.getElementById('tab-' + n + '-loading');
+    const dataEl = document.getElementById('tab-' + n + '-data');
+    if (loader) loader.style.display = 'none';
+    if (dataEl) dataEl.style.display = 'block';
+}
+
+function showTabError(n, msg) {
+    const loader = document.getElementById('tab-' + n + '-loading');
+    const dataEl = document.getElementById('tab-' + n + '-data');
+    if (loader) loader.style.display = 'none';
+    if (dataEl) {
+        dataEl.innerHTML = '<div class="error-box"><h3>Error</h3><pre>' + escHtml(msg) + '</pre></div>';
+        dataEl.style.display = 'block';
+    }
+}
+
+/* ---------------------------------------------------------------
+   HELPERS
+--------------------------------------------------------------- */
+function escHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function sevBadge(sev) {
+    const s = (sev || 'info').toLowerCase();
+    const labels = { critical: 'CRITICAL', high: 'HIGH', medium: 'MEDIUM', low: 'LOW', info: 'INFO' };
+    return '<span class="sev-chip sev-' + s + '">' + (labels[s] || s.toUpperCase()) + '</span>';
+}
+
+function copyToClipboard(text, btnEl) {
+    navigator.clipboard.writeText(text).then(function() {
+        const oldText = btnEl.innerText;
+        btnEl.innerText = '✓ Copied!';
+        setTimeout(function() { btnEl.innerText = oldText; }, 1500);
+    });
+}
+
+function normTarget(v) {
+    return String(v || '').trim().toLowerCase();
+}
+
+function buildVerifyLookupKey(moduleName, target) {
+    return String(moduleName || '') + '::' + normTarget(target);
+}
+
+function applyVerifyCacheRow(rowId, cacheEntry) {
+    if (!rowId || !cacheEntry) return;
+
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+
+    if (btn && cacheEntry.button_text) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = cacheEntry.button_text;
+    }
+
+    if (resEl && cacheEntry.result_html) {
+        const patchedHtml = String(cacheEntry.result_html)
+            .replace(/showVerifyPopup\('([^']*)'\)/g, "showVerifyPopup('" + rowId + "')")
+            .replace(/showVerifyPopup\(\"([^\"]*)\"\)/g, 'showVerifyPopup("' + rowId + '")');
+        resEl.innerHTML = patchedHtml;
+    }
+
+    if (cacheEntry.modal && typeof cacheEntry.modal === 'object') {
+        window._verifyResultsData[rowId] = cacheEntry.modal;
+    }
+}
+
+function rehydrateVerifierUI() {
+    const cache = window._verifyPersistentCache || {};
+    Object.keys(cache).forEach(function(rowId) {
+        const entry = cache[rowId];
+        let targetRowId = rowId;
+
+        if (!document.getElementById('res_' + targetRowId) && entry && entry.module && entry.target) {
+            const key = buildVerifyLookupKey(entry.module, entry.target);
+            if (window._verifyRowLookup[key]) {
+                targetRowId = window._verifyRowLookup[key];
+            }
+        }
+        applyVerifyCacheRow(targetRowId, entry);
+    });
+}
+
+function persistVerifyResult(rowId, moduleName, target, buttonText, resultHtml, modalObj) {
+    const payload = {
+        row_id: rowId,
+        module: moduleName || '',
+        target: target || '',
+        button_text: buttonText || '',
+        result_html: resultHtml || '',
+        modal: modalObj || {}
+    };
+
+    window._verifyPersistentCache[rowId] = payload;
+
+    fetch('/api/scan/' + SCAN_ID + '/verify-cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).catch(function() {});
+}
+
+function fetchVerifyCache() {
+    return fetch('/api/scan/' + SCAN_ID + '/verify-cache')
+        .then(function(r) {
+            if (!r.ok) return { cache: {} };
+            return r.json();
+        })
+        .then(function(data) {
+            window._verifyPersistentCache = (data && data.cache) ? data.cache : {};
+            window._verifyCacheLoaded = true;
+            rehydrateVerifierUI();
+            return data;
+        })
+        .catch(function() {
+            window._verifyPersistentCache = window._verifyPersistentCache || {};
+            window._verifyCacheLoaded = true;
+            return { cache: {} };
+        });
+}
+
+function renderPocToolbar() {
+    const state = window._pocState || {};
+    const statusText = state.loading
+        ? 'Sedang generate PoC...'
+        : (state.generated
+            ? (state.loadedFromCache ? 'PoC dari cache' : 'PoC terbaru siap')
+            : 'PoC belum di-generate');
+
+    const statusCls = state.loading ? 'res-open-ro' : (state.generated ? 'res-secure' : 'res-dead');
+    const generateLabel = state.loading ? '⏳ Generating...' : (state.generated ? '♻️ Generate Ulang' : '⚡ Generate PoC Sekarang');
+
+    return '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">'
+        + '<div><span class="res-badge ' + statusCls + '">' + statusText + '</span></div>'
+        + '<div style="display:flex; gap:8px;">'
+        + '<button class="btn btn-sm btn-primary" id="btn-poc-generate" onclick="requestPocGeneration(true)"' + (state.loading ? ' disabled' : '') + '>' + generateLabel + '</button>'
+        + '<button class="btn btn-sm" id="btn-poc-refresh" onclick="requestPocGeneration(false)"' + (state.loading ? ' disabled' : '') + '>🔄 Ambil Cache/Refresh</button>'
+        + '</div>'
+        + '</div>';
+}
+
+function renderPocArea() {
+    const container = document.getElementById('poc-cards-dynamic');
+    if (!container) return;
+
+    const state = window._pocState || {};
+    let html = renderPocToolbar();
+    html += '<div id="poc-cards-body">';
+
+    if (state.loading) {
+        html += '<div class="spinner-text">Mengekstrak parameter komponen &amp; meracik PoC...</div>';
+    } else if (state.generated && state.payload) {
+        html += buildPocCardsHtml(state.payload);
+    } else {
+        html += '<p class="empty" style="padding:12px;">PoC belum dimuat. Klik <strong>Generate PoC Sekarang</strong> untuk build on-demand.</p>';
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function buildPocCardsHtml(pocData) {
+    const compPocs = pocData.component_pocs || [];
+    const dlPocs = pocData.deeplink_pocs || [];
+
+    if (compPocs.length === 0 && dlPocs.length === 0) {
+        return '<p class="empty" style="padding:12px;">Tidak ada custom scheme / komponen exported yang dapat di-generate PoC otomatis pada aplikasi ini.</p>';
+    }
+
+    let html = '';
+    dlPocs.forEach(function(p, idx) {
+        html += '<div class="poc-card">';
+        html += '<div class="poc-card-header">';
+        html += '<span class="poc-card-title">🔗 DeepLink Intent &amp; WebView Exploit #' + (idx + 1) + '</span>';
+        html += '<div style="display:flex; gap:6px; flex-wrap:wrap;">';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.bash_poc).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">📋 Copy ADB Bash</button>';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.html_poc).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">🌐 Copy HTML Exploit</button>';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.python_poc).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">🐍 Copy Python Script</button>';
+        html += '</div></div>';
+        html += '<div class="poc-card-desc">Target DeepLink Scheme: <code>' + escHtml(p.test_url || p.deeplink) + '</code></div>';
+        html += '<pre class="poc-code-block">' + escHtml(p.bash_poc) + '</pre>';
+        html += '</div>';
+    });
+
+    compPocs.forEach(function(p) {
+        const extrasCount = (p.extracted_extras || []).length;
+        const extrasBadge = extrasCount > 0 ? '<span class="res-badge res-alive" style="font-size:10px; margin-left:8px;">✓ ' + extrasCount + ' Param Asli Terekstrak</span>' : '';
+
+        html += '<div class="poc-card">';
+        html += '<div class="poc-card-header">';
+        html += '<span class="poc-card-title">📱 Exported ' + escHtml((p.component_type || 'activity').toUpperCase()) + ': ' + escHtml((p.component_name || '').split('.').pop()) + extrasBadge + '</span>';
+        html += '<div style="display:flex; gap:6px; flex-wrap:wrap;">';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.bash_poc).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">📋 Copy Bash PoC</button>';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.python_poc).replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">🐍 Copy Python Logcat Script</button>';
+        html += '</div></div>';
+        html += '<div class="poc-card-desc">Komponen terbuka: <code>' + escHtml(p.component_name || '') + '</code></div>';
+        html += '<pre class="poc-code-block">' + escHtml(p.bash_poc || '') + '</pre>';
+        html += '</div>';
+    });
+
+    return html;
+}
+
+function requestPocGeneration(forceRegen) {
+    const state = window._pocState;
+    if (!state || state.loading) return;
+
+    state.loading = true;
+    renderPocArea();
+
+    const force = forceRegen ? 1 : 0;
+    const lazy = forceRegen ? 0 : 1;
+    fetch('/api/scan/' + SCAN_ID + '/pocs?force=' + force + '&lazy=' + lazy)
+        .then(function(r) {
+            if (!r.ok) {
+                return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+            }
+            return r.json();
+        })
+        .then(function(pocData) {
+            state.loading = false;
+
+            if (pocData && pocData.needs_generation && !forceRegen) {
+                state.generated = false;
+                state.payload = null;
+                state.loadedFromCache = false;
+                renderPocArea();
+                return;
+            }
+
+            state.payload = pocData || null;
+            state.generated = true;
+            state.loadedFromCache = !!(pocData && pocData.from_cache);
+            renderPocArea();
+        })
+        .catch(function() {
+            state.loading = false;
+            renderPocArea();
+            const body = document.getElementById('poc-cards-body');
+            if (body) body.innerHTML = '<p class="empty" style="padding:12px; color:var(--danger);">Gagal generate PoC. Coba klik Generate Ulang.</p>';
+        });
+}
+
+function initPocSection() {
+    const state = window._pocState;
+    if (!state) return;
+    if (state.initialized) {
+        renderPocArea();
+        return;
+    }
+    state.initialized = true;
+    state.generated = false;
+    state.loading = false;
+    state.payload = null;
+    state.loadedFromCache = false;
+    renderPocArea();
+    requestPocGeneration(false);
+}
+
+/* ---------------------------------------------------------------
+   FETCH INITIAL DATA & UPDATE ALL TABS
+--------------------------------------------------------------- */
+let isInitRunning = false;
+function initData() {
+    if (isInitRunning) return;
+    isInitRunning = true;
+
+    Promise.all([
+        fetch('/api/scan/' + SCAN_ID).then(function(r) { return r.json(); }),
+        fetch('/api/scan/' + SCAN_ID + '/endpoints').then(function(r) { return r.json(); }).catch(function() { return []; }),
+        fetch('/api/scan/' + SCAN_ID + '/verify-cache').then(function(r) {
+            if (!r.ok) return { cache: {} };
+            return r.json();
+        }).catch(function() { return { cache: {} }; })
+    ])
+    .then(function(results) {
+        const data = results[0];
+        const eps = results[1] || [];
+        const verifyCacheData = results[2] || { cache: {} };
+
+        globalScanData = data;
+        globalSecrets = data.secrets || [];
+        globalFindings = data.findings || [];
+        globalEndpoints = eps;
+        window._verifyPersistentCache = verifyCacheData.cache || {};
+        window._verifyCacheLoaded = true;
+        isDataLoaded = true;
+
+        // 1. Update Tab Badges
+        const b3 = document.getElementById('tab-3-badge');
+        if (b3) {
+            b3.innerText = globalSecrets.length;
+            if (globalSecrets.some(function(s) { return (s.severity||'').toLowerCase() === 'critical' || (s.severity||'').toLowerCase() === 'high'; })) {
+                b3.classList.add('tab-badge-danger');
+            }
+        }
+
+        const b5 = document.getElementById('tab-5-badge');
+        if (b5) b5.innerText = globalFindings.length;
+
+        const b4 = document.getElementById('tab-4-badge');
+        if (b4) b4.innerText = globalEndpoints.length;
+
+        // Components count
+        let compsRaw = [];
+        const mf = data.manifest_info || {};
+        try {
+            compsRaw = typeof mf.components === 'string' ? JSON.parse(mf.components || '[]') : (mf.components || []);
+        } catch(e) {}
+        const compCount = Array.isArray(compsRaw) ? compsRaw.length : (typeof compsRaw === 'object' && compsRaw !== null ? Object.values(compsRaw).flat().length : 0);
+        const b2 = document.getElementById('tab-2-badge');
+        if (b2) b2.innerText = compCount;
+
+        // 2. Render active tab
+        loadTabContent(currentTabNumber);
+    })
+    .catch(function(err) {
+        console.error("InitData error:", err);
+        showTabError(1, "Gagal memuat data scan: " + err.message);
+    });
+}
+
+/* ---------------------------------------------------------------
+   TAB 1: OVERVIEW (EXECUTIVE DASHBOARD)
+--------------------------------------------------------------- */
+function loadOverview() {
+    if (!globalScanData) return;
+    const data = globalScanData;
+    const m = data.manifest_info || {};
+    const d = document.getElementById('tab-1-data');
+
+    // 0. BINARY & TECHNICAL METADATA HERO CARD
+    const meta = data.meta || {};
+    const targetPath = meta.target || data.file_path || '—';
+    const pkgName = meta.package_name || m.package_name || data.package_name || '—';
+    const sha256Val = meta.sha256 || '—';
+    const techStackVal = meta.tech_stack || data.tech_stack || '—';
+    const raspVal = meta.rasp || data.rasp || '—';
+    const frameworkVal = meta.framework || 'Unknown';
+    const detectionVal = meta.detection || '—';
+    const filesScanned = meta.files_scanned || (data.stats && data.stats.files) || '—';
+    const linesScanned = meta.lines_scanned || (data.stats && data.stats.lines) || '—';
+    const sourceVal = meta.source || 'Operator-supplied package';
+    const splitVal = meta.split_apks || '—';
+    const fileTypeVal = (meta.file_type || data.file_type || data.platform || 'apk').toUpperCase();
+
+    let html = '';
+
+    // ============================================================
+    // 1. IDENTITAS BINER & METADATA TEKNIS (HERO CARD)
+    // ============================================================
+    html += '<div class="binary-meta-box">';
+    html += '<div class="binary-meta-header">';
+    html += '<div class="binary-meta-title">📋 <span>Identitas Biner &amp; Metadata Teknis</span></div>';
+    html += '<div style="display:flex; align-items:center; gap:8px;">';
+    html += '<span class="badge badge-' + (data.platform || 'android') + '">' + fileTypeVal + '</span>';
+    if (meta.framework && meta.framework !== 'Unknown') {
+        html += '<span class="permission-tag tech-tag">' + escHtml(meta.framework) + '</span>';
+    }
+    html += '</div></div>';
+
+    html += '<div class="meta-grid-2col">';
+
+    // Row 1: Target Path & Package Name
+    html += '<div class="meta-field"><div class="meta-field-label"><span>TARGET FILE</span>';
+    if (targetPath !== '—') {
+        html += '<button class="meta-copy-btn" onclick="copyToClipboard(\'' + escHtml(targetPath).replace(/'/g, "\\'") + '\', this)">📋 Copy Path</button>';
+    }
+    html += '</div><div class="meta-field-value"><code style="font-size:12px; color:#38bdf8;">' + escHtml(targetPath) + '</code></div></div>';
+
+    html += '<div class="meta-field"><div class="meta-field-label"><span>PACKAGE / BUNDLE ID</span>';
+    if (pkgName !== '—') {
+        html += '<button class="meta-copy-btn" onclick="copyToClipboard(\'' + escHtml(pkgName).replace(/'/g, "\\'") + '\', this)">📋 Copy</button>';
+    }
+    html += '</div><div class="meta-field-value"><strong style="color:#fbbf24; font-size:14px;">' + escHtml(pkgName) + '</strong></div></div>';
+
+    // Row 2: SHA-256 Hash
+    if (sha256Val !== '—') {
+        html += '<div class="meta-field meta-field-full"><div class="meta-field-label"><span>SHA-256 CHECKSUM HASH</span>';
+        html += '<button class="meta-copy-btn" onclick="copyToClipboard(\'' + escHtml(sha256Val).replace(/'/g, "\\'") + '\', this)">📋 Copy SHA-256</button>';
+        html += '</div><div class="meta-field-value"><code style="font-size:12px; color:#a3e635; letter-spacing:0.04em;">' + escHtml(sha256Val) + '</code></div></div>';
+    }
+
+    // Row 3: Volume Scan & Framework Detection
+    html += '<div class="meta-field"><div class="meta-field-label"><span>VOLUME KODE YANG DISCAN</span></div>';
+    html += '<div class="meta-field-value"><span><strong>' + escHtml(String(filesScanned)) + '</strong> Files discan</span><span style="color:var(--text-muted);">|</span><span><strong>' + escHtml(String(linesScanned)) + '</strong> Baris Kode</span></div></div>';
+
+    html += '<div class="meta-field"><div class="meta-field-label"><span>FRAMEWORK &amp; DETEKSI</span></div>';
+    html += '<div class="meta-field-value"><span>Framework: <strong>' + escHtml(frameworkVal) + '</strong></span><span style="color:var(--text-muted);">|</span><span>Deteksi: <strong>' + escHtml(detectionVal) + '</strong></span></div></div>';
+
+    // Row 4: Tech Stack Summary
+    html += '<div class="meta-field meta-field-full"><div class="meta-field-label"><span>TECH STACK ANALYSIS</span></div>';
+    html += '<div class="meta-field-value" style="font-size:12px; color:#e2e8f0; line-height:1.5;">' + escHtml(techStackVal) + '</div></div>';
+
+    // Row 5: Source & RASP Status
+    html += '<div class="meta-field"><div class="meta-field-label"><span>SOURCE &amp; SPLIT APKS</span></div>';
+    html += '<div class="meta-field-value"><span>' + escHtml(sourceVal) + '</span><span style="color:var(--text-muted);">|</span><span>Split: ' + escHtml(splitVal) + '</span></div></div>';
+
+    html += '<div class="meta-field"><div class="meta-field-label"><span>RASP / ANTI-TAMPER CHECK</span></div>';
+    html += '<div class="meta-field-value"><strong style="color:' + (raspVal.includes('SEBAGIAN') || raspVal.includes('ADA') ? '#f59e0b' : '#94a3b8') + ';">' + escHtml(raspVal) + '</strong></div></div>';
+
+    html += '</div></div>'; // end binary-meta-box
+
+    // 2. Scorecard Grade Calculation
+    const critCount = globalSecrets.filter(s => (s.severity||'').toLowerCase() === 'critical').length +
+                      globalFindings.filter(f => (f.severity||'').toLowerCase() === 'critical').length;
+    const highCount = globalSecrets.filter(s => (s.severity||'').toLowerCase() === 'high').length +
+                      globalFindings.filter(f => (f.severity||'').toLowerCase() === 'high').length;
+    const medCount = globalSecrets.filter(s => (s.severity||'').toLowerCase() === 'medium').length +
+                     globalFindings.filter(f => (f.severity||'').toLowerCase() === 'medium').length;
+    const lowCount = globalSecrets.filter(s => (s.severity||'').toLowerCase() === 'low' || (s.severity||'').toLowerCase() === 'info').length +
+                     globalFindings.filter(f => (f.severity||'').toLowerCase() === 'low' || (f.severity||'').toLowerCase() === 'info').length;
+
+    let grade = 'A';
+    let gradeCls = 'grade-a';
+    let gradeDesc = 'Aplikasi memiliki postur keamanan baik tanpa temuan kritis.';
+    if (critCount > 1 || (critCount === 1 && highCount > 3)) {
+        grade = 'F'; gradeCls = 'grade-f'; gradeDesc = 'RISIKO KRITIS: Ditemukan kredensial sensitif atau celah keamanan level tinggi!';
+    } else if (critCount === 1 || highCount > 2) {
+        grade = 'C'; gradeCls = 'grade-c'; gradeDesc = 'RISIKO TINGGI: Terdapat temuan signifikan yang perlu perbaikan segera.';
+    } else if (highCount > 0 || medCount > 5) {
+        grade = 'B'; gradeCls = 'grade-b'; gradeDesc = 'RISIKO SEDANG: Ada beberapa celah medium/high yang perlu di-harden.';
+    }
+
+    // Scorecard Box
+    html += '<div class="scorecard-box">';
+    html += '<div class="grade-circle ' + gradeCls + '">' + grade + '</div>';
+    html += '<div class="scorecard-info">';
+    html += '<h3>Security Posture Grade: ' + grade + '</h3>';
+    html += '<p>' + gradeDesc + '</p>';
+    html += '<div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">';
+    html += '<span class="sev-chip sev-critical">CRITICAL: ' + critCount + '</span>';
+    html += '<span class="sev-chip sev-high">HIGH: ' + highCount + '</span>';
+    html += '<span class="sev-chip sev-medium">MEDIUM: ' + medCount + '</span>';
+    html += '<span class="sev-chip sev-low">LOW: ' + lowCount + '</span>';
+    html += '</div></div></div>';
+
+    // Overview Grid: Posture Checklist & Attack Surface Radar
+    html += '<div class="overview-grid">';
+
+    // Left Box: Security Checklist
+    html += '<div class="section-block"><div class="section-title-static"><span>🛡️ Protection &amp; Config Checklist</span></div><div class="section-content">';
+    html += '<div class="posture-list">';
+    html += '<div class="posture-item"><span class="posture-label">Obfuscation / Anti-Tamper</span><span class="posture-val">' + escHtml(data.rasp || 'Standard Analysis') + '</span></div>';
+    html += '<div class="posture-item"><span class="posture-label">Platform Architecture</span><span class="posture-val safe">' + escHtml((data.platform || 'unknown')).toUpperCase() + ' (' + escHtml(data.file_type || 'binary') + ')</span></div>';
+    html += '<div class="posture-item"><span class="posture-label">Target SDK / OS</span><span class="posture-val ' + (m.target_sdk && parseInt(m.target_sdk) < 31 ? 'warn' : 'safe') + '">' + escHtml(m.target_sdk ? 'SDK ' + m.target_sdk : (data.platform === 'ios' ? 'iOS Universal' : 'Standard')) + '</span></div>';
+    html += '<div class="posture-item"><span class="posture-label">Min Supported Version</span><span class="posture-val">' + escHtml(m.min_sdk ? 'SDK ' + m.min_sdk : (data.platform === 'ios' ? 'iOS' : '—')) + '</span></div>';
+    html += '<div class="posture-item"><span class="posture-label">Framework Tech Stack</span><span class="posture-val safe">' + escHtml(data.tech_stack || 'Native / Hybrid') + '</span></div>';
+    html += '</div></div></div>';
+
+    // Right Box: Attack Surface Radar
+    let perms = [];
+    let deeplinks = [];
+    try { perms = typeof m.permissions === 'string' ? JSON.parse(m.permissions || '[]') : (m.permissions || []); } catch(e) {}
+    try { deeplinks = typeof m.deep_links === 'string' ? JSON.parse(m.deep_links || '[]') : (m.deep_links || []); } catch(e) {}
+
+    html += '<div class="section-block"><div class="section-title-static"><span>📡 Attack Surface Radar</span></div><div class="section-content">';
+    html += '<div class="radar-grid">';
+    html += '<div class="radar-item"><span class="radar-count">' + globalSecrets.length + '</span><span class="radar-title">Hardcoded Secrets</span></div>';
+    html += '<div class="radar-item"><span class="radar-count">' + globalEndpoints.length + '</span><span class="radar-title">Discovered Endpoints</span></div>';
+    html += '<div class="radar-item"><span class="radar-count">' + deeplinks.length + '</span><span class="radar-title">Custom Deep Links</span></div>';
+    html += '<div class="radar-item"><span class="radar-count">' + perms.length + '</span><span class="radar-title">Declared Permissions</span></div>';
+    html += '</div></div></div>';
+
+    html += '</div>'; // end overview-grid
+
+    // Top Critical Highlights
+    const topSecrets = globalSecrets.slice(0, 5);
+    if (topSecrets.length > 0) {
+        html += '<div class="section-block"><div class="section-title-static"><span>🔥 Top Priority Secrets &amp; Findings</span></div>';
+        html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+        html += '<table class="secrets-table"><thead><tr><th style="width:100px;">Severity</th><th>Rule / Deskripsi</th><th>Match Value (Klik Context)</th><th>File</th></tr></thead><tbody>';
+        topSecrets.forEach(function(s, idx) {
+            const secretKey = 'sec_top_' + idx;
+            window._secretsData[secretKey] = {
+                file: s.file_path || '',
+                line: parseInt(s.line_number || s.line || 0),
+                match: s.match || '',
+                context: s.context || '',
+                rule: s.rule_id || s.category || 'Secret',
+                sev: (s.severity || 'high').toLowerCase()
+            };
+            html += '<tr>';
+            html += '<td>' + sevBadge(s.severity) + '</td>';
+            html += '<td><span class="rule-chip">' + escHtml(s.rule_id || s.category) + '</span></td>';
+            html += '<td><span class="clickable-secret" data-secret-key="' + secretKey + '"><span class="hardcoded-highlight">' + escHtml((s.match||'').substring(0, 80)) + '</span></span></td>';
+            html += '<td class="file-cell">' + escHtml((s.file_path||'').split(/[/\\]/).pop()) + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    d.innerHTML = html;
+    showTabData(1);
+}
+
+/* ---------------------------------------------------------------
+   TAB 2: COMPONENTS & IPC (MANIFEST & DEEP LINKS)
+--------------------------------------------------------------- */
+function loadComponents() {
+    const d = document.getElementById('tab-2-data');
+    const m = (globalScanData && globalScanData.manifest_info) || {};
+
+    let perms = [];
+    let compsRaw = [];
+    let deeplinks = [];
+    try { perms = typeof m.permissions === 'string' ? JSON.parse(m.permissions || '[]') : (m.permissions || []); } catch(e) {}
+    try { compsRaw = typeof m.components === 'string' ? JSON.parse(m.components || '[]') : (m.components || []); } catch(e) {}
+    try { deeplinks = typeof m.deep_links === 'string' ? JSON.parse(m.deep_links || '[]') : (m.deep_links || []); } catch(e) {}
+
+    let html = '';
+
+    // 1. Deep Links with One-Click ADB Command
+    if (deeplinks && deeplinks.length > 0) {
+        html += '<div class="section-block"><div class="section-title-static"><span>🔗 Custom Deep Links &amp; Exploit Trigger</span> <span class="section-count">' + deeplinks.length + '</span></div>';
+        html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+        html += '<table class="secrets-table"><thead><tr><th>Scheme / URL</th><th>ADB PoC Command</th><th>Aksi</th></tr></thead><tbody>';
+        deeplinks.forEach(function(dl) {
+            const schemeStr = typeof dl === 'string' ? dl : (Array.isArray(dl) ? dl.join('://') : JSON.stringify(dl));
+            const adbCmd = 'adb shell am start -a android.intent.action.VIEW -d "' + schemeStr + '"';
+            html += '<tr>';
+            html += '<td><span class="permission-tag deeplink">' + escHtml(schemeStr) + '</span></td>';
+            html += '<td><code style="font-size:11px;">' + escHtml(adbCmd) + '</code></td>';
+            html += '<td><button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(adbCmd).replace(/'/g, "\\'") + '\', this)">📋 Copy ADB</button></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    // 2. Exported Components
+    let compGroups = { activities: [], services: [], receivers: [], providers: [] };
+    if (Array.isArray(compsRaw)) {
+        compsRaw.forEach(function(c) {
+            const t = (c.type || '').toLowerCase();
+            if (t === 'activity') compGroups.activities.push(c);
+            else if (t === 'service') compGroups.services.push(c);
+            else if (t === 'receiver') compGroups.receivers.push(c);
+            else if (t === 'provider') compGroups.providers.push(c);
+            else compGroups.activities.push(c);
+        });
+    }
+
+    const totalComps = compGroups.activities.length + compGroups.services.length + compGroups.receivers.length + compGroups.providers.length;
+    if (totalComps > 0) {
+        html += '<div class="section-block"><div class="section-title-static"><span>📱 Komponen Android (Total ' + totalComps + ')</span></div><div class="section-content">';
+        ['activities', 'services', 'receivers', 'providers'].forEach(function(typeKey) {
+            const items = compGroups[typeKey];
+            if (!items || items.length === 0) return;
+            const typeTitle = typeKey.charAt(0).toUpperCase() + typeKey.slice(1);
+            html += '<h4 class="comp-type-title">' + typeTitle + ' <span class="section-count">' + items.length + '</span></h4>';
+            html += '<div class="permission-list">';
+            items.forEach(function(item) {
+                const name = typeof item === 'string' ? item : (item.name || JSON.stringify(item));
+                const isExported = typeof item === 'object' && (item.exported === 'true' || item.exported === true);
+                html += '<span class="permission-tag' + (isExported ? ' comp-exported' : '') + '" title="' + (isExported ? 'EXPORTED: TRUE' : 'EXPORTED: FALSE') + '">' + escHtml(name) + '</span>';
+            });
+            html += '</div>';
+        });
+        html += '</div></div>';
+    }
+
+    // 3. Permissions
+    if (perms && perms.length > 0) {
+        html += '<div class="section-block"><div class="section-title-static"><span>Izin Aplikasi (Permissions)</span> <span class="section-count">' + perms.length + '</span></div><div class="section-content"><div class="permission-list">';
+        perms.forEach(function(p) {
+            const name = typeof p === 'string' ? p : (p.name || JSON.stringify(p));
+            const isDanger = /CAMERA|RECORD_AUDIO|READ_CONTACTS|ACCESS_FINE|CALL_PHONE|SEND_SMS|READ_EXTERNAL|WRITE_EXTERNAL|READ_CALL_LOG/.test(name);
+            html += '<span class="permission-tag' + (isDanger ? ' perm-danger' : '') + '">' + escHtml(name) + '</span>';
+        });
+        html += '</div></div></div>';
+    }
+
+    if (!html) {
+        html = '<div class="empty-state"><p>📱 Komponen AndroidManifest tidak tersedia untuk paket biner ini (iOS IPA / Native Framework Assets).</p></div>';
+    }
+
+    d.innerHTML = html;
+    showTabData(2);
+}
+
+/* ---------------------------------------------------------------
+   TAB 3: SECRETS & KEYS (WITH SUB-CATEGORIES & PII BREAKDOWN)
+--------------------------------------------------------------- */
+let activeSecretCategory = 'ALL';
+let activePiiSubCategory = 'ALL_PII';
+
+function filterSecretCategory(cat, btnEl) {
+    activeSecretCategory = cat;
+    activePiiSubCategory = 'ALL_PII';
+    document.querySelectorAll('#secret-subcat-bar .subcat-btn').forEach(b => b.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    renderSecretsTable();
+}
+
+function filterPiiSubCategory(subCat, btnEl) {
+    activePiiSubCategory = subCat;
+    document.querySelectorAll('#pii-nested-bar .subcat-btn-nested').forEach(b => b.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    renderSecretsTable();
+}
+
+function classifyPiiSubtype(s) {
+    const r = (s.rule_id || '').toLowerCase();
+    const c = (s.category || '').toLowerCase();
+    const m = (s.match || '').toLowerCase();
+
+    // 1. Password & Kredensial Login
+    if (r.includes('password') || r.includes('passwd') || r.includes('pwd') ||
+        r.includes('login_credential') || r.includes('base64_creds') ||
+        c.includes('credentials') || m.startsWith('password:') || m.includes('password=') || m.includes('pwd=')) {
+        return 'password';
+    }
+    // 2. Email Address
+    if (r.includes('email') || (m.includes('@') && m.includes('.') && !m.includes(' '))) {
+        return 'email';
+    }
+    // 3. Nomor Telepon / HP
+    if (r.includes('phone') || r.includes('handphone') || r.includes('telepon') || r.includes('nohp') || /^08\d{8,11}$/.test((s.match||'').trim())) {
+        return 'phone';
+    }
+    // 4. Nomor Rekening & Kartu Bank
+    if (r.includes('bank') || r.includes('rekening') || r.includes('card') || r.includes('credit_card') || r.includes('account_number')) {
+        return 'bank';
+    }
+    // 5. NIK / KTP / Identitas
+    if (r.includes('nik') || r.includes('ktp') || r.includes('passport') || r.includes('identity')) {
+        return 'identity';
+    }
+    return 'other';
+}
+
+function isPiiItem(s) {
+    const c = (s.category || '').toLowerCase();
+    const r = (s.rule_id || '').toLowerCase();
+    return c === 'pii' || c === 'credentials' || r.includes('password') || r.includes('email') || r.includes('phone') || r.includes('rekening') || r.includes('nik');
+}
+
+function loadSecrets() {
+    renderSecretsTable();
+    showTabData(3);
+}
+
+function renderSecretsTable() {
+    const d = document.getElementById('tab-3-data');
+    if (!globalSecrets || globalSecrets.length === 0) {
+        d.innerHTML = '<div class="empty-state"><p>Tidak ada hardcoded secrets terdeteksi.</p></div>';
+        return;
+    }
+
+    // 1. Sub-category Filter Buttons Utama
+    let html = '<div class="subcat-filter" id="secret-subcat-bar">';
+    const categories = ['ALL', 'Cloud & SaaS', 'Payment Gateways', 'Crypto & Tokens', 'Database & Auth', 'PII'];
+    categories.forEach(function(cat) {
+        const isActive = activeSecretCategory === cat ? ' active' : '';
+        html += '<button class="subcat-btn' + isActive + '" onclick="filterSecretCategory(\'' + cat + '\', this)">' + cat + '</button>';
+    });
+    html += '</div>';
+
+    // 2. Nested Sub-filter Bar KHUSUS saat kategori PII aktif
+    if (activeSecretCategory === 'PII') {
+        const allPiiItems = globalSecrets.filter(isPiiItem);
+        const passCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'password').length;
+        const emailCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'email').length;
+        const phoneCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'phone').length;
+        const bankCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'bank').length;
+        const idCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'identity').length;
+
+        html += '<div class="subcat-nested" id="pii-nested-bar">';
+        html += '<span class="subcat-nested-title">Sub-Tipe PII:</span>';
+        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'ALL_PII' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'ALL_PII\', this)">🔘 Semua PII (' + allPiiItems.length + ')</button>';
+        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'password' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'password\', this)">🔑 Password (' + passCount + ')</button>';
+        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'email' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'email\', this)">📧 Email (' + emailCount + ')</button>';
+        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'phone' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'phone\', this)">📱 Nomor HP (' + phoneCount + ')</button>';
+        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'bank' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'bank\', this)">💳 Rekening / Kartu (' + bankCount + ')</button>';
+        if (idCount > 0) {
+            html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'identity' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'identity\', this)">👤 NIK / Identitas (' + idCount + ')</button>';
+        }
+        html += '</div>';
+    }
+
+    // 3. Filter items sesuai kategori dan sub-kategori
+    const filtered = globalSecrets.filter(function(s) {
+        if (activeSecretCategory === 'ALL') return true;
+        const c = (s.category || '').toLowerCase();
+        const r = (s.rule_id || '').toLowerCase();
+        if (activeSecretCategory === 'Cloud & SaaS') return c.includes('aws') || c.includes('gcp') || c.includes('firebase') || c.includes('azure') || c.includes('github');
+        if (activeSecretCategory === 'Payment Gateways') return c.includes('stripe') || c.includes('paypal') || c.includes('midtrans') || c.includes('payment');
+        if (activeSecretCategory === 'Crypto & Tokens') return (c.includes('crypto') || c.includes('jwt') || r.includes('key') || r.includes('token') || r.includes('iv')) && !isPiiItem(s);
+        if (activeSecretCategory === 'Database & Auth') return c.includes('database') || c.includes('sql') || c.includes('mongo') || c.includes('redis');
+        if (activeSecretCategory === 'PII') {
+            if (!isPiiItem(s)) return false;
+            if (activePiiSubCategory === 'ALL_PII') return true;
+            return classifyPiiSubtype(s) === activePiiSubCategory;
+        }
+        return true;
+    });
+
+    html += '<div class="section-block"><div class="section-title-static"><span>Hardcoded Secrets &amp; Keys (' + filtered.length + ')</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    html += '<table class="secrets-table"><thead><tr>';
+    html += '<th style="width:100px;">Severity</th>';
+    html += '<th style="width:190px;">Rule / Klasifikasi</th>';
+    html += '<th>Hardcoded Match (Klik untuk Source Context ±5 Baris)</th>';
+    html += '<th>File</th>';
+    html += '<th style="width:60px;">Line</th>';
+    html += '</tr></thead><tbody>';
+
+    filtered.forEach(function(s, idx) {
+        const sev = (s.severity || 'info').toLowerCase();
+        const matchVal = s.match || '';
+        const shortFile = (s.file_path || '').split(/[/\\]/).pop() || '—';
+        const fullFile = s.file_path || '';
+        const line = s.line_number || s.line || 0;
+        const rule = s.rule_id || s.rule || s.category || '—';
+        const cat = s.category || '—';
+        const context = s.context || '';
+
+        let piiBadgeHtml = '';
+        if (isPiiItem(s)) {
+            const ptype = classifyPiiSubtype(s);
+            if (ptype === 'password') piiBadgeHtml = '<br><span class="pii-tag pii-tag-pass">🔑 Password</span>';
+            else if (ptype === 'email') piiBadgeHtml = '<br><span class="pii-tag pii-tag-email">📧 Email</span>';
+            else if (ptype === 'phone') piiBadgeHtml = '<br><span class="pii-tag pii-tag-phone">📱 No. HP</span>';
+            else if (ptype === 'bank') piiBadgeHtml = '<br><span class="pii-tag pii-tag-bank">💳 Rekening/Kartu</span>';
+            else if (ptype === 'identity') piiBadgeHtml = '<br><span class="pii-tag pii-tag-id">👤 NIK/KTP</span>';
+        }
+
+        const secretKey = 'sec_tab3_' + idx;
+        window._secretsData[secretKey] = {
+            file: fullFile,
+            line: parseInt(line) || 0,
+            match: matchVal,
+            context: context,
+            rule: rule,
+            sev: sev
+        };
+
+        html += '<tr class="secret-row">';
+        html += '<td>' + sevBadge(sev) + '</td>';
+        html += '<td><span class="rule-chip">' + escHtml(rule) + '</span><br><span class="cat-label">' + escHtml(cat) + '</span>' + piiBadgeHtml + '</td>';
+        html += '<td>';
+        html += '<span class="clickable-secret" data-secret-key="' + secretKey + '" title="Klik untuk membuka source code context">';
+        html += '<span class="hardcoded-highlight">' + escHtml(matchVal.substring(0, 100)) + '</span>';
+        if (matchVal.length > 100) html += '<span class="truncated-indicator">…</span>';
+        html += '</span>';
+        html += '</td>';
+        html += '<td class="file-cell" title="' + escHtml(fullFile) + '">' + escHtml(shortFile) + '</td>';
+        html += '<td class="line-cell">' + (line ? '<span class="line-num">:' + escHtml(String(line)) + '</span>' : '—') + '</td>';
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    d.innerHTML = html;
+}
+
+/* ---------------------------------------------------------------
+   TAB 4: NETWORK & IPS (RFC 1918 PRIVATE VS PUBLIC & ENDPOINTS)
+--------------------------------------------------------------- */
+let activeNetworkFilter = 'ALL';
+
+function isPotentialHost(ep) {
+    const url = (ep.url || '').toLowerCase();
+    const host = (ep.host || '').toLowerCase();
+    const env = (ep.env || '').toLowerCase();
+
+    if (!host && !url) return false;
+
+    const noiseDomains = [
+        'google.', 'googleapis.com', 'gstatic.com', 'android.com', 'apple.com',
+        'w3.org', 'schema.org', 'github.com', 'github.io', 'adobe.com',
+        'oasis-open.org', 'openoffice.org', 'openxmlformats.org', 'mozilla.net',
+        'mozilla.org', 'stenciljs.com', 'lottiefiles.com', 'dhtmlx.', 'fontawesome.',
+        'unpkg.com', 'cdnjs.', 'jsdelivr.', 'bit.ly', 'line.me', 'vimeo.com',
+        'youtube.com', 'facebook.com', 'twitter.com', 'purl.org', 'purl.oclc.org',
+        'sil.org', 'zwobble.org', 'typenetwork.com', 'appspot.com', 'transistorsoft.com'
+    ];
+    if (noiseDomains.some(function(nd) { return host.includes(nd) || url.includes(nd); })) {
+        return false;
+    }
+
+    const devEnvs = ['dev', 'staging', 'stg', 'test', 'qa', 'uat', 'sandbox', 'beta', 'preprod', 'preview', 'internal', 'local'];
+    if (devEnvs.includes(env)) return true;
+
+    const pattern = /(^https?:\/\/dev\.|^dev\.|^https?:\/\/staging\.|^staging\.|^https?:\/\/stg\.|^stg\.|^https?:\/\/uat\.|^uat\.|^https?:\/\/qa\.|^qa\.|^https?:\/\/test\.|^test\.|-dev\.|[.\/]dev[.\/-]|-staging\.|[.\/]staging[.\/-]|-stg\.|[.\/]stg[.\/-]|-uat\.|[.\/]uat[.\/-]|-qa\.|[.\/]qa[.\/-]|-test\.|[.\/]test[.\/-]|-sandbox\.|[.\/]sandbox[.\/-]|-beta\.|[.\/]beta[.\/-]|internal|intranet)/i;
+    return pattern.test(host) || pattern.test(url);
+}
+
+function filterNetwork(cat, btnEl) {
+    activeNetworkFilter = cat;
+    document.querySelectorAll('#network-subcat-bar .subcat-btn').forEach(b => b.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    renderNetworkTable();
+}
+
+function loadNetwork() {
+    renderNetworkTable();
+    showTabData(4);
+}
+
+function renderNetworkTable() {
+    const d = document.getElementById('tab-4-data');
+    if (!globalEndpoints || globalEndpoints.length === 0) {
+        d.innerHTML = '<div class="empty-state"><p>Tidak ada network endpoints terdeteksi.</p></div>';
+        return;
+    }
+
+    const potentialCount = globalEndpoints.filter(isPotentialHost).length;
+
+    let html = '<div class="subcat-filter" id="network-subcat-bar">';
+    const filters = [
+        { label: 'ALL', id: 'ALL' },
+        { label: 'Host Potensial (' + potentialCount + ')', id: 'Host Potensial' },
+        { label: 'Private IPs / LAN', id: 'Private IPs / LAN' },
+        { label: 'Public IPs', id: 'Public IPs' },
+        { label: 'Insecure HTTP', id: 'Insecure HTTP' },
+        { label: 'API Routes', id: 'API Routes' }
+    ];
+    filters.forEach(function(f) {
+        const isActive = activeNetworkFilter === f.id ? ' active' : '';
+        html += '<button class="subcat-btn' + isActive + '" onclick="filterNetwork(\'' + f.id + '\', this)">' + f.label + '</button>';
+    });
+    html += '</div>';
+
+    const filtered = globalEndpoints.filter(function(ep) {
+        const url = (ep.url || '').toLowerCase();
+        const host = (ep.host || '').toLowerCase();
+        const isPriv = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|localhost)/.test(host);
+        if (activeNetworkFilter === 'Host Potensial') return isPotentialHost(ep);
+        if (activeNetworkFilter === 'Private IPs / LAN') return isPriv;
+        if (activeNetworkFilter === 'Public IPs') return !isPriv && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+        if (activeNetworkFilter === 'Insecure HTTP') return url.startsWith('http://');
+        if (activeNetworkFilter === 'API Routes') return url.includes('/api/') || url.includes('/v1/') || url.includes('graphql');
+        return true;
+    });
+
+    html += '<div class="section-block"><div class="section-title-static"><span>Network Endpoints (' + filtered.length + ')</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    html += '<table class="secrets-table"><thead><tr>';
+    html += '<th style="width:140px;">Klasifikasi Host</th>';
+    html += '<th>URL Endpoint</th>';
+    html += '<th style="width:80px;">Port</th>';
+    html += '<th>Environment</th>';
+    html += '</tr></thead><tbody>';
+
+    filtered.forEach(function(ep) {
+        const host = ep.host || '';
+        const isPriv = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|localhost)/.test(host);
+        const isPot = isPotentialHost(ep);
+
+        let typeBadge = '';
+        if (isPot) {
+            typeBadge = '<span class="res-badge res-open-ro" style="font-size:10px;">⚠️ Dev / Staging</span><br>';
+        } else if (isPriv) {
+            typeBadge = '<span class="res-badge res-priv" style="font-size:10px;">🏠 Private LAN</span><br>';
+        } else {
+            typeBadge = '<span class="env-badge env-production" style="font-size:10px;">🌍 Remote Host</span><br>';
+        }
+
+        const envVal = ep.env || (isPot ? 'dev/stg' : 'prod');
+        const envClass = (envVal.includes('dev') || envVal.includes('stg') || envVal.includes('staging')) ? 'env-dev' : (envVal === 'prod' || envVal === 'production' ? 'env-production' : 'env-unknown');
+
+        html += '<tr>';
+        html += '<td>' + typeBadge + '<small style="font-family:var(--font-mono); font-size:11px;">' + escHtml(host) + '</small></td>';
+        html += '<td class="endpoint-url-cell"><a class="endpoint-link" href="' + escHtml(ep.url||'') + '" target="_blank" rel="noopener noreferrer">' + escHtml(ep.url||'—') + '</a></td>';
+        html += '<td class="line-cell">' + escHtml(String(ep.port||'—')) + '</td>';
+        html += '<td><span class="env-badge ' + envClass + '">' + escHtml(envVal) + '</span></td>';
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    d.innerHTML = html;
+}
+
+/* ---------------------------------------------------------------
+   TAB 5: VULN FINDINGS (BY OWASP DOMAINS)
+--------------------------------------------------------------- */
+function loadFindings() {
+    const d = document.getElementById('tab-5-data');
+    if (!globalFindings || globalFindings.length === 0) {
+        d.innerHTML = '<div class="empty-state"><p>Tidak ada temuan vulnerabilitas terdeteksi.</p></div>';
+        showTabData(5);
+        return;
+    }
+
+    const domains = {
+        '🌐 WebView Security': [],
+        '📂 Storage & File Flaws': [],
+        '🔄 IPC & Intent Injection': [],
+        '🔒 Cryptography & Network': [],
+        '🧬 Logic & General Vulnerabilities': []
+    };
+
+    globalFindings.forEach(function(f) {
+        const cat = (f.category || '').toLowerCase();
+        const title = (f.title || f.description || '').toLowerCase();
+        if (cat.includes('webview') || title.includes('webview') || title.includes('xss')) {
+            domains['🌐 WebView Security'].push(f);
+        } else if (cat.includes('storage') || cat.includes('file') || title.includes('traversal') || title.includes('zip')) {
+            domains['📂 Storage & File Flaws'].push(f);
+        } else if (cat.includes('intent') || cat.includes('component') || title.includes('pendingintent') || title.includes('strandhogg')) {
+            domains['🔄 IPC & Intent Injection'].push(f);
+        } else if (cat.includes('crypto') || cat.includes('network') || title.includes('ssl') || title.includes('random') || title.includes('ecb')) {
+            domains['🔒 Cryptography & Network'].push(f);
+        } else {
+            domains['🧬 Logic & General Vulnerabilities'].push(f);
+        }
+    });
+
+    let html = '';
+    Object.keys(domains).forEach(function(dName) {
+        const items = domains[dName];
+        if (items.length === 0) return;
+
+        html += '<div class="section-block finding-group">';
+        html += '<div class="section-title-static">';
+        html += '<span class="finding-rule">' + dName + '</span>';
+        html += '<span class="section-count">' + items.length + '</span>';
+        html += '</div>';
+        html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+        html += '<table class="secrets-table"><thead><tr><th style="width:90px;">Sev</th><th>Judul Temuan</th><th>File</th><th style="width:60px;">Line</th></tr></thead><tbody>';
+
+        items.slice(0, 40).forEach(function(f) {
+            const sev = (f.severity || 'info').toLowerCase();
+            const shortFile = (f.file_path || '').split(/[/\\]/).pop() || '—';
+            html += '<tr class="secret-row">';
+            html += '<td>' + sevBadge(sev) + '</td>';
+            html += '<td>';
+            html += '<span class="finding-title">' + escHtml(f.title || f.description || '—') + '</span>';
+            if (f.description && f.description !== f.title) {
+                html += '<br><span class="finding-desc-inline">' + escHtml(f.description.substring(0, 140)) + '</span>';
+            }
+            html += '</td>';
+            html += '<td class="file-cell" title="' + escHtml(f.file_path || '') + '">' + escHtml(shortFile) + '</td>';
+            html += '<td class="line-cell">' + (f.line_number ? '<span class="line-num">:' + escHtml(String(f.line_number)) + '</span>' : '—') + '</td>';
+            html += '</tr>';
+        });
+
+        if (items.length > 40) {
+            html += '<tr><td colspan="4" style="text-align:center; padding:12px; color:var(--text-muted);">... dan ' + (items.length - 40) + ' temuan lainnya dalam domain ini</td></tr>';
+        }
+
+        html += '</tbody></table></div></div>';
+    });
+
+    d.innerHTML = html;
+    showTabData(5);
+}
+
+/* ---------------------------------------------------------------
+   TAB 6: LIVE VERIFIER & RECON (ON-DEMAND MANUAL TESTING)
+--------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   TAB 6: LIVE VERIFIER & RECON (ON-DEMAND MANUAL TESTING)
+--------------------------------------------------------------- */
+window._liveVerifierCandidates = {
+    firebase: [],
+    googleKeys: [],
+    endpoints: [],
+    ips: [],
+    awsKeys: [],
+    stripeKeys: [],
+    webhooks: []
+};
+
+function loadLiveVerifier() {
+    const d = document.getElementById('tab-6-data');
+    if (!d) return;
+    window._verifyRowLookup = {};
+
+    const firebaseAssets = [];
+    const ipAssets = [];
+    const googleKeys = [];
+    const potentialEndpoints = [];
+    const awsKeys = [];
+    const stripeKeys = [];
+    const webhooks = [];
+
+    // 1. Secrets extraction
+    globalSecrets.forEach(function(s) {
+        const m = (s.match || '').trim();
+        const r = (s.rule_id || '').toLowerCase();
+        const c = (s.category || '').toLowerCase();
+
+        // Firebase Realtime DB URLs
+        if (m.includes('.firebaseio.com') || m.includes('.firebase.app')) {
+            const urlMatch = m.match(/https?:\/\/[a-zA-Z0-9.-]+\.firebaseio\.com/i);
+            const fbUrl = urlMatch ? urlMatch[0] : (m.startsWith('http') ? m : 'https://' + m);
+            if (fbUrl.includes('.firebaseio.com') && !firebaseAssets.includes(fbUrl)) {
+                firebaseAssets.push(fbUrl);
+            }
+        }
+
+        // Google Maps & Cloud API Key (AIzaSy...)
+        const aizaMatch = m.match(/AIza[0-9A-Za-z_-]{35}/);
+        if (aizaMatch) {
+            const key = aizaMatch[0];
+            if (!googleKeys.includes(key)) {
+                googleKeys.push(key);
+            }
+        }
+
+        // AWS Access Key (AKIA... / ASIA...)
+        const awsMatch = m.match(/\b(AKIA|ASIA)[0-9A-Z]{16}\b/);
+        if (awsMatch || r.includes('aws_access_key') || c.includes('aws')) {
+            const ak = awsMatch ? awsMatch[0] : m;
+            if (ak && !awsKeys.some(a => a.access_key === ak)) {
+                awsKeys.push({ access_key: ak, secret_key: '', file: s.file_path, line: s.line_number });
+            }
+        }
+
+        // Stripe Key (pk_... / sk_...)
+        const stripeMatch = m.match(/\b(pk_live_|sk_live_|pk_test_|sk_test_)[0-9a-zA-Z]{24,}\b/);
+        if (stripeMatch || r.includes('stripe') || c.includes('stripe')) {
+            const sk = stripeMatch ? stripeMatch[0] : m;
+            if (sk && !stripeKeys.includes(sk)) {
+                stripeKeys.push(sk);
+            }
+        }
+
+        // Webhooks (Slack, Discord)
+        if (m.includes('hooks.slack.com') || m.includes('discord.com/api/webhooks') || m.includes('discordapp.com/api/webhooks')) {
+            const hookMatch = m.match(/https?:\/\/(?:hooks\.slack\.com\/services\/[^\s'"]+|discord(?:app)?\.com\/api\/webhooks\/[^\s'"]+)/i);
+            const hookUrl = hookMatch ? hookMatch[0] : (m.startsWith('http') ? m : 'https://' + m);
+            if (!webhooks.includes(hookUrl)) {
+                webhooks.push(hookUrl);
+            }
+        }
+    });
+
+    // 2. Endpoints extraction
+    globalEndpoints.forEach(function(ep) {
+        const u = (ep.url || '').trim();
+        const h = (ep.host || '').trim();
+
+        if (u.includes('.firebaseio.com')) {
+            const urlMatch = u.match(/https?:\/\/[a-zA-Z0-9.-]+\.firebaseio\.com/i);
+            const fbUrl = urlMatch ? urlMatch[0] : u;
+            if (fbUrl.includes('.firebaseio.com') && !firebaseAssets.includes(fbUrl)) {
+                firebaseAssets.push(fbUrl);
+            }
+        }
+
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) && !ipAssets.includes(h)) {
+            ipAssets.push(h);
+        }
+
+        if (isPotentialHost(ep) && u && !potentialEndpoints.some(p => p.url === u)) {
+            potentialEndpoints.push(ep);
+        }
+
+        if (u.includes('hooks.slack.com') || u.includes('discord.com/api/webhooks') || u.includes('discordapp.com/api/webhooks')) {
+            if (!webhooks.includes(u)) {
+                webhooks.push(u);
+            }
+        }
+    });
+
+    window._liveVerifierCandidates = {
+        firebase: firebaseAssets,
+        googleKeys: googleKeys,
+        endpoints: potentialEndpoints,
+        ips: ipAssets,
+        awsKeys: awsKeys,
+        stripeKeys: stripeKeys,
+        webhooks: webhooks
+    };
+
+    let html = '';
+
+    // ==========================================
+    // ⚡ AUTOMATED POC GENERATOR SECTION (TOP)
+    // ==========================================
+    html += '<div class="section-block" style="border-left:4px solid var(--accent); margin-bottom:24px;">';
+    html += '<div class="section-title-static" style="background:rgba(59,130,246,0.1); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">';
+    html += '<span style="color:var(--accent); font-weight:800; font-size:16px;">⚡ Automated PoC &amp; Exploit Generator (One-Click)</span>';
+    html += '<div style="display:flex; gap:8px;">';
+    html += '<button class="btn btn-sm btn-primary" onclick="openFridaModalDirect()" style="display:flex; align-items:center; gap:6px;">💉 View Frida Bypass Script (.js)</button>';
+    html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
+    html += '</div></div>';
+    html += '<div class="section-content" id="poc-generator-container">';
+    html += '<p class="subtitle" style="margin-bottom:16px;">Script pembuktian konsep (Proof-of-Concept) siap pakai yang di-generate langsung dari temuan Manifest, DeepLink, dan IPC:</p>';
+    html += '<div id="poc-cards-dynamic"></div>';
+    html += '</div></div>';
+
+    // ==========================================
+    // 🧪 LIVE VERIFIER ACTIVE TEST SUITES (BOTTOM)
+    // ==========================================
+    html += '<p class="subtitle" style="margin-bottom:16px;">Uji keaktifan dan exploitability kredensial cloud / endpoint secara on-demand / manual:</p>';
+
+    // 1. Firebase Live Tester
+    html += '<div class="section-block"><div class="section-title-static"><span>🔥 Firebase Realtime Database CRUD Tester</span> <span class="section-count">' + firebaseAssets.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (firebaseAssets.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>Firebase Database URL</th><th style="width:160px;">Aksi Test</th><th>Hasil Verifikasi (Klik untuk Detail)</th></tr></thead><tbody>';
+        firebaseAssets.forEach(function(fbUrl, idx) {
+            const rowId = 'fb_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('firebase', fbUrl)] = rowId;
+            html += '<tr>';
+            html += '<td style="font-family:var(--font-mono); font-weight:600; color:var(--info);">' + escHtml(fbUrl) + '</td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyFirebase(' + idx + ')">▶ Test CRUD</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada URL Firebase Database (.firebaseio.com) yang ditemukan pada aplikasi ini.</p>';
+    }
+    html += '</div></div>';
+
+    // 2. Google Maps & Cloud API Key Suite Checker
+    html += '<div class="section-block"><div class="section-title-static"><span>🔑 Google Maps &amp; Cloud API Key Suite Checker (10 API Scopes)</span> <span class="section-count">' + googleKeys.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (googleKeys.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>API Key Match</th><th style="width:180px;">Aksi Check</th><th>Active Scopes &amp; Exploitability (Klik untuk Detail)</th></tr></thead><tbody>';
+        googleKeys.forEach(function(keyStr, idx) {
+            const rowId = 'gkey_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('google-api', keyStr)] = rowId;
+            html += '<tr>';
+            html += '<td><span class="hardcoded-highlight">' + escHtml(keyStr) + '</span></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyGoogleKey(' + idx + ')">🔑 Check 10 Scopes</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada Google API Key yang terdeteksi.</p>';
+    }
+    html += '</div></div>';
+
+    // 3. AWS IAM / STS Identity Checker
+    html += '<div class="section-block"><div class="section-title-static"><span>☁️ AWS IAM Credentials &amp; STS GetCallerIdentity Prober</span> <span class="section-count">' + awsKeys.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (awsKeys.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>AWS Access Key</th><th>Secret Key Input (Opsional)</th><th style="width:160px;">Aksi Check</th><th>Status STS (Klik untuk Detail)</th></tr></thead><tbody>';
+        awsKeys.forEach(function(item, idx) {
+            const rowId = 'aws_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('aws', item.access_key)] = rowId;
+            html += '<tr>';
+            html += '<td><span class="hardcoded-highlight">' + escHtml(item.access_key) + '</span></td>';
+            html += '<td><input type="text" id="aws_sk_input_' + idx + '" placeholder="Masukkan Secret Key jika ada..." class="filter-search" style="font-size:11px; padding:6px 10px; width:100%;"></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyAws(' + idx + ')">☁️ GetCallerIdentity</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada AWS Access Key (AKIA/ASIA) yang terdeteksi.</p>';
+    }
+    html += '</div></div>';
+
+    // 4. Stripe Key Validator
+    html += '<div class="section-block"><div class="section-title-static"><span>💳 Stripe API Key Validator (pk_live vs sk_live)</span> <span class="section-count">' + stripeKeys.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (stripeKeys.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>Stripe Key</th><th>Tipe / Format</th><th style="width:160px;">Aksi Validate</th><th>Live Balance Status (Klik untuk Detail)</th></tr></thead><tbody>';
+        stripeKeys.forEach(function(sKey, idx) {
+            const rowId = 'stripe_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('stripe', sKey)] = rowId;
+            const isSk = sKey.startsWith('sk_');
+            html += '<tr>';
+            html += '<td><span class="hardcoded-highlight">' + escHtml(sKey) + '</span></td>';
+            html += '<td><span class="res-badge ' + (isSk ? 'res-open-rw' : 'res-priv') + '">' + (isSk ? 'Secret Key (sk_)' : 'Publishable Key (pk_)') + '</span></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyStripe(' + idx + ')">💳 Cek Stripe API</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada Stripe Key yang terdeteksi.</p>';
+    }
+    html += '</div></div>';
+
+    // 5. Webhooks Validator (Slack / Discord)
+    html += '<div class="section-block"><div class="section-title-static"><span>💬 Slack &amp; Discord Webhook Prober</span> <span class="section-count">' + webhooks.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (webhooks.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>Webhook URL</th><th>Platform</th><th style="width:160px;">Aksi Probe</th><th>Hasil Status (Klik untuk Detail)</th></tr></thead><tbody>';
+        webhooks.forEach(function(wUrl, idx) {
+            const rowId = 'hook_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('webhook', wUrl)] = rowId;
+            const isSlack = wUrl.includes('slack.com');
+            html += '<tr>';
+            html += '<td style="font-family:var(--font-mono); font-size:12px;">' + escHtml(wUrl) + '</td>';
+            html += '<td><span class="res-badge ' + (isSlack ? 'res-alive' : 'res-priv') + '">' + (isSlack ? 'Slack' : 'Discord') + '</span></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyWebhook(' + idx + ')">💬 Probe Webhook</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada Slack / Discord Webhook URL yang terdeteksi.</p>';
+    }
+    html += '</div></div>';
+
+    // 6. Host Potensial (Dev / Staging / Internal) Health Check
+    html += '<div class="section-block"><div class="section-title-static"><span>⚠️ Host Potensial (Dev / Staging) Endpoint Prober</span> <span class="section-count">' + potentialEndpoints.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (potentialEndpoints.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>Host / Environment</th><th>URL Target</th><th style="width:160px;">Aksi Probe</th><th>Hasil Respon (Klik untuk Detail)</th></tr></thead><tbody>';
+        potentialEndpoints.forEach(function(ep, idx) {
+            const rowId = 'pot_row_' + idx;
+            const u = ep.url || '';
+            const h = ep.host || '';
+            window._verifyRowLookup[buildVerifyLookupKey('endpoint', u)] = rowId;
+            html += '<tr>';
+            html += '<td><span class="res-badge res-open-ro" style="font-size:10px;">DEV / STAGING</span><br><small style="font-family:var(--font-mono);">' + escHtml(h) + '</small></td>';
+            html += '<td class="endpoint-url-cell"><a class="endpoint-link" href="' + escHtml(u) + '" target="_blank" rel="noopener noreferrer">' + escHtml(u) + '</a></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyEndpoint(' + idx + ')">⚡ Probe URL</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada host dev/staging terisolasi yang ditemukan.</p>';
+    }
+    html += '</div></div>';
+
+    // 7. IP Inspector & Port Probe
+    html += '<div class="section-block"><div class="section-title-static"><span>🌐 IP Inspector &amp; Reachability Probe</span> <span class="section-count">' + ipAssets.length + '</span></div>';
+    html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
+    if (ipAssets.length > 0) {
+        html += '<table class="secrets-table"><thead><tr><th>Alamat IP</th><th style="width:160px;">Aksi Probe</th><th>Hasil Status &amp; GeoIP (Klik untuk Detail)</th></tr></thead><tbody>';
+        ipAssets.forEach(function(ipStr, idx) {
+            const rowId = 'ip_row_' + idx;
+            window._verifyRowLookup[buildVerifyLookupKey('ip', ipStr)] = rowId;
+            html += '<tr>';
+            html += '<td style="font-family:var(--font-mono); font-weight:600;">' + escHtml(ipStr) + '</td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyIP(' + idx + ')">⚡ Probe IP</button></td>';
+            html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada IP mentah yang terdeteksi pada aplikasi ini.</p>';
+    }
+    html += '</div></div>';
+
+    d.innerHTML = html;
+    window._liveVerifierRenderedOnce = true;
+    showTabData(6);
+    rehydrateVerifierUI();
+    if (!window._verifyCacheLoaded) {
+        fetchVerifyCache();
+    }
+
+    initPocSection();
+}
+
+function openFridaModalDirect() {
+    fetch('/api/scan/' + SCAN_ID + '/frida-script')
+        .then(function(r) { return r.text(); })
+        .then(function(scriptCode) {
+            document.getElementById('verify-modal-title').textContent = 'Frida Security Hook & Universal Bypass Suite';
+            document.getElementById('verify-modal-target').textContent = 'Target Package: ' + (globalScanData.package_name || 'com.target.app');
+            document.getElementById('verify-modal-verdict').textContent = 'FRIDA SCRIPT READY';
+            document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-low';
+
+            let modalHtml = '<div style="margin-bottom:14px;"><p style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">Script Frida berikut mencakup <strong>Universal SSL Pinning Bypass (OkHttp3, TrustManager)</strong>, <strong>Root/Tamper Detection Bypass</strong>, <strong>Biometric Authentication Auto-Pass</strong>, dan <strong>Crypto Secret Key Dumper</strong>:</p></div>';
+            modalHtml += '<div style="display:flex; gap:8px; margin-bottom:12px;">';
+            modalHtml += '<button class="btn btn-sm btn-primary" onclick="copyToClipboard(document.getElementById(\'frida-script-raw\').innerText, this)">📋 Copy Full Script</button>';
+            modalHtml += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-secondary);">⬇️ Download bypass_hooks.js</a>';
+            modalHtml += '</div>';
+            modalHtml += '<pre id="frida-script-raw" style="background:var(--bg-primary); padding:16px; border-radius:8px; font-family:var(--font-mono); font-size:12px; color:#38bdf8; max-height:450px; overflow-y:auto; line-height:1.6;">' + escHtml(scriptCode) + '</pre>';
+
+            document.getElementById('verify-modal-content').innerHTML = modalHtml;
+            const modal = document.getElementById('verify-modal');
+            modal.style.display = 'flex';
+        })
+        .catch(function(err) {
+            alert('Gagal mengambil Frida script: ' + err.message);
+        });
+}
+
+/* ---------------------------------------------------------------
+   INDEX-BASED VERIFICATION TRIGGERS
+--------------------------------------------------------------- */
+function triggerVerifyFirebase(idx) {
+    const url = window._liveVerifierCandidates.firebase[idx];
+    const rowId = 'fb_row_' + idx;
+    if (!url) return;
+    verifyFirebase(url, rowId);
+}
+
+function triggerVerifyGoogleKey(idx) {
+    const key = window._liveVerifierCandidates.googleKeys[idx];
+    const rowId = 'gkey_row_' + idx;
+    if (!key) return;
+    verifyGoogleKey(key, rowId);
+}
+
+function triggerVerifyEndpoint(idx) {
+    const ep = window._liveVerifierCandidates.endpoints[idx];
+    const rowId = 'pot_row_' + idx;
+    if (!ep || !ep.url) return;
+    verifyEndpoint(ep.url, rowId);
+}
+
+function triggerVerifyIP(idx) {
+    const ip = window._liveVerifierCandidates.ips[idx];
+    const rowId = 'ip_row_' + idx;
+    if (!ip) return;
+    verifyIP(ip, rowId);
+}
+
+function triggerVerifyAws(idx) {
+    const item = window._liveVerifierCandidates.awsKeys[idx];
+    const rowId = 'aws_row_' + idx;
+    if (!item) return;
+    const inputEl = document.getElementById('aws_sk_input_' + idx);
+    const skVal = inputEl ? inputEl.value.trim() : '';
+    verifyAws(item.access_key, skVal, rowId);
+}
+
+function triggerVerifyStripe(idx) {
+    const key = window._liveVerifierCandidates.stripeKeys[idx];
+    const rowId = 'stripe_row_' + idx;
+    if (!key) return;
+    verifyStripe(key, rowId);
+}
+
+function triggerVerifyWebhook(idx) {
+    const url = window._liveVerifierCandidates.webhooks[idx];
+    const rowId = 'hook_row_' + idx;
+    if (!url) return;
+    verifyWebhook(url, rowId);
+}
+
+/* ---------------------------------------------------------------
+   MODAL POPUP HANDLERS
+--------------------------------------------------------------- */
+function showVerifyPopup(modalKey) {
+    const data = window._verifyResultsData[modalKey];
+    if (!data) return;
+
+    document.getElementById('verify-modal-title').textContent = data.title || 'Live Verification Response';
+    document.getElementById('verify-modal-target').textContent = data.target || '';
+    document.getElementById('verify-modal-verdict').textContent = data.verdictLabel || '';
+    document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip ' + (data.verdictClass || '');
+    document.getElementById('verify-modal-content').innerHTML = data.contentHtml || '';
+
+    const modal = document.getElementById('verify-modal');
+    modal.style.display = 'flex';
+}
+
+function closeVerifyModal(event) {
+    if (event.target === document.getElementById('verify-modal')) {
+        closeVerifyModalDirect();
+    }
+}
+
+function closeVerifyModalDirect() {
+    document.getElementById('verify-modal').style.display = 'none';
+}
+
+/* ---------------------------------------------------------------
+   NEW VERIFICATION HANDLERS (AWS, STRIPE, WEBHOOK)
+--------------------------------------------------------------- */
+function verifyAws(ak, sk, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Calling STS...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/aws', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_key: ak, secret_key: sk })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-check';
+
+        let badgeHtml = '';
+        let vClass = 'sev-info';
+        let vLabel = 'AWS STS';
+
+        if (data.is_active) {
+            badgeHtml = '<span class="res-badge res-open-rw res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🚨 CRITICAL: AWS KEY ACTIVE!</span>';
+            vClass = 'sev-critical'; vLabel = 'AWS KEY VALID &amp; ACTIVE';
+        } else if (data.has_secret) {
+            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 INVALID / REVOKED</span>';
+            vClass = 'sev-low'; vLabel = 'INVALID OR REVOKED';
+        } else {
+            badgeHtml = '<span class="res-badge res-open-ro res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚠️ KEY ID FOUND</span>';
+            vClass = 'sev-high'; vLabel = 'NEEDS SECRET ACCESS KEY';
+        }
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-secondary);">' + escHtml(data.summary || '') + '</small>';
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + (data.is_active ? '#dc2626' : '#64748b') + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.summary) + '</strong>';
+        modalHtml += '</div>';
+
+        if (data.caller_identity && data.caller_identity.arn) {
+            modalHtml += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">';
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">ACCOUNT ID</span><br><strong style="color:#38bdf8;">' + escHtml(data.caller_identity.account) + '</strong></div>';
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">USER ID</span><br><code>' + escHtml(data.caller_identity.user_id) + '</code></div>';
+            modalHtml += '</div>';
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px; margin-bottom:14px;"><span style="color:var(--text-muted); font-size:11px;">CALLER ARN</span><br><strong style="color:#22c55e;">' + escHtml(data.caller_identity.arn) + '</strong></div>';
+        }
+
+        if (data.raw_response) {
+            modalHtml += '<div><strong style="color:var(--text-primary); font-size:13px;">Raw STS XML Response:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:11px; color:#38bdf8; overflow-x:auto; max-height:200px; margin-top:6px;">' + escHtml(data.raw_response) + '</pre></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'AWS STS GetCallerIdentity Verification',
+            target: 'Access Key: ' + ak,
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'aws', ak, btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '☁️ STS Probe';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+function verifyStripe(key, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Calling Stripe...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/stripe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-check';
+
+        let badgeHtml = '';
+        let vClass = 'sev-low';
+        let vLabel = data.key_type;
+
+        if (data.active) {
+            badgeHtml = '<span class="res-badge res-open-rw res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🚨 CRITICAL: STRIPE LIVE SK ACTIVE!</span>';
+            vClass = 'sev-critical'; vLabel = 'STRIPE SECRET KEY VALID';
+        } else if (data.is_secret) {
+            badgeHtml = '<span class="res-badge res-dead res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 REVOKED / INACTIVE</span>';
+            vClass = 'sev-low'; vLabel = 'REVOKED STRIPE KEY';
+        } else {
+            badgeHtml = '<span class="res-badge res-priv res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">ℹ️ PUBLISHABLE KEY</span>';
+            vClass = 'sev-info'; vLabel = 'CLIENT-SIDE PK (SAFE)';
+        }
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-secondary);">' + escHtml(data.summary || '') + '</small>';
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + (data.active ? '#dc2626' : '#06b6d4') + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.summary) + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">KEY TYPE</span><br><strong style="font-size:14px; color:#38bdf8;">' + escHtml(data.key_type) + '</strong></div>';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">ENVIRONMENT</span><br><strong style="font-size:14px; color:' + (data.is_live ? '#f59e0b' : '#22c55e') + ';">' + escHtml(data.env_type) + '</strong></div>';
+        modalHtml += '</div>';
+
+        if (data.raw_response) {
+            modalHtml += '<div><strong style="color:var(--text-primary); font-size:13px;">Raw Stripe API Response:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:11px; color:#86efac; overflow-x:auto; max-height:200px; margin-top:6px;">' + escHtml(data.raw_response) + '</pre></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'Stripe API Key Security Audit',
+            target: 'Stripe Key: ' + (data.full_key || key),
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'stripe', (data.full_key || key), btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '💳 Check Key';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+function verifyWebhook(url, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Testing Webhook...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-probe';
+
+        let badgeHtml = '';
+        let vClass = 'sev-low';
+        let vLabel = 'INACTIVE WEBHOOK';
+
+        if (data.active) {
+            badgeHtml = '<span class="res-badge res-open-ro res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🚨 HIGH: WEBHOOK ACTIVE!</span>';
+            vClass = 'sev-high'; vLabel = 'ACTIVE WEBHOOK LEAK';
+        } else {
+            badgeHtml = '<span class="res-badge res-dead res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚪ INACTIVE / REVOKED</span>';
+            vClass = 'sev-low'; vLabel = 'INACTIVE WEBHOOK';
+        }
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-secondary);">' + escHtml(data.summary || '') + '</small>';
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + (data.active ? '#f97316' : '#64748b') + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.summary) + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:6px; margin-bottom:14px;"><span style="color:var(--text-muted); font-size:11px;">Webhook Target</span><br><code style="color:#38bdf8; font-size:12px; word-break:break-all;">' + escHtml(data.full_url || url) + '</code></div>';
+
+        if (data.raw_response) {
+            modalHtml += '<div><strong style="color:var(--text-primary); font-size:13px;">Raw Webhook Response:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:11px; color:#c9d1d9; max-height:160px; overflow-y:auto; margin-top:6px;">' + escHtml(data.raw_response) + '</pre></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: data.hook_type + ' Security Verification',
+            target: data.url || url,
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'webhook', (data.url || url), btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '💬 Probe';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+/* ---------------------------------------------------------------
+   AJAX VERIFICATION ACTIONS (WITH POPUP FULL DETAILS)
+--------------------------------------------------------------- */
+function verifyFirebase(url, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Testing...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/firebase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+    })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-test';
+
+        let badgeHtml = '';
+        let vClass = 'sev-low';
+        let vLabel = 'SECURE (RULES ACTIVE)';
+
+        if (data.verdict === 'CRITICAL_OPEN_RW') {
+            badgeHtml = '<span class="res-badge res-open-rw res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🚨 CRITICAL: OPEN READ &amp; WRITE!</span>';
+            vClass = 'sev-critical'; vLabel = 'CRITICAL (READ/WRITE OPEN)';
+        } else if (data.verdict === 'HIGH_OPEN_READ') {
+            badgeHtml = '<span class="res-badge res-open-ro res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚠️ HIGH: OPEN READ ONLY</span>';
+            vClass = 'sev-high'; vLabel = 'HIGH (READ OPEN)';
+        } else {
+            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 SECURE / PROTECTED</span>';
+            vClass = 'sev-low'; vLabel = 'SECURE (RULES ACTIVE)';
+        }
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-secondary);">' + escHtml(data.summary || '') + '</small>';
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + (data.verdict === 'SECURE' ? '#22c55e' : '#dc2626') + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.summary || 'Hasil Pengujian Firebase') + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">READ PERMISSION</span><br><strong style="color:' + (data.read_open ? '#ef4444' : '#22c55e') + '; font-size:14px;">' + (data.read_open ? '🚨 OPEN (PUBLIC READ)' : '🔒 PROTECTED (AUTH REQUIRED)') + '</strong></div>';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">WRITE PERMISSION</span><br><strong style="color:' + (data.write_open ? '#ef4444' : '#22c55e') + '; font-size:14px;">' + (data.write_open ? '🚨 OPEN (PUBLIC WRITE)' : '🔒 PROTECTED (AUTH REQUIRED)') + '</strong></div>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="margin-bottom:14px; background:var(--bg-secondary); padding:10px 14px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">Tested Endpoint URL</span><br><code style="color:#38bdf8; font-size:12px;">' + escHtml(data.test_read_url || data.url || url) + '</code></div>';
+
+        modalHtml += '<div style="margin-bottom:14px;"><strong style="color:var(--text-primary); font-size:13px;">Hasil Pengujian CRUD:</strong><ul style="margin:8px 0 0 20px; color:var(--text-secondary); font-size:13px;">';
+        (data.details || []).forEach(function(d) {
+            modalHtml += '<li style="margin-bottom:4px;">' + escHtml(d) + '</li>';
+        });
+        modalHtml += '</ul></div>';
+
+        if (data.raw_response) {
+            modalHtml += '<div style="margin-top:14px;"><strong style="color:var(--text-primary); font-size:13px;">Raw Server Response Body:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:12px; color:#38bdf8; overflow-x:auto; margin-top:6px;">' + escHtml(data.raw_response) + '</pre></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'Firebase Database Verification Report',
+            target: data.url || url,
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'firebase', (data.url || url), btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '▶ Test CRUD';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+function verifyIP(ip, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Probing...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/ip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: ip })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+    })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-probe';
+
+        let badgeHtml = '';
+        let vClass = 'sev-info';
+        let vLabel = 'IP PROBE';
+
+        if (data.is_private) {
+            badgeHtml = '<span class="res-badge res-priv res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🏠 ' + escHtml(data.type) + '</span>';
+            vClass = 'sev-info'; vLabel = 'RFC 1918 PRIVATE';
+        } else if (data.alive) {
+            const geo = data.geo || {};
+            const geoStr = [geo.country, geo.isp].filter(Boolean).join(' - ');
+            badgeHtml = '<span class="res-badge res-alive res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🟢 ALIVE (Port ' + data.open_ports.join(', ') + ')</span>';
+            vClass = 'sev-low'; vLabel = 'HOST ONLINE';
+        } else {
+            badgeHtml = '<span class="res-badge res-dead res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚪ CLOSED / TIMEOUT</span>';
+            vClass = 'sev-info'; vLabel = 'HOST UNREACHABLE';
+        }
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-muted);">' + escHtml(data.message || '') + '</small>';
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        const ipBorder = data.is_private ? '#06b6d4' : (data.alive ? '#22c55e' : '#64748b');
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + ipBorder + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.message || 'Status IP Reachability') + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">IP ADDRESS</span><br><strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.ip) + '</strong></div>';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">NETWORK TYPE</span><br><strong style="font-size:13px; color:#38bdf8;">' + escHtml(data.type) + '</strong></div>';
+        if (data.hostname) {
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">REVERSE HOSTNAME</span><br><code>' + escHtml(data.hostname) + '</code></div>';
+        }
+        if (data.open_ports && data.open_ports.length > 0) {
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">OPEN PORTS</span><br><strong style="color:#22c55e; font-size:14px;">' + data.open_ports.join(', ') + '</strong></div>';
+        }
+        modalHtml += '</div>';
+
+        if (data.geo && data.geo.country) {
+            modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:6px; margin-top:12px;">';
+            modalHtml += '<strong style="color:var(--text-primary); font-size:13px;">GeoIP &amp; ASN Information:</strong>';
+            modalHtml += '<div style="margin-top:8px; font-size:13px; color:var(--text-secondary); line-height:1.7;">';
+            modalHtml += '📍 Lokasi: <strong>' + escHtml([data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(', ')) + '</strong><br>';
+            modalHtml += '🏢 ISP: <strong>' + escHtml(data.geo.isp || '—') + '</strong><br>';
+            modalHtml += '🌐 ASN: <strong>' + escHtml([data.geo.as, data.geo.org].filter(Boolean).join(' / ') || '—') + '</strong>';
+            modalHtml += '</div></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'IP Reachability & Recon Report',
+            target: data.ip,
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'ip', data.ip || ip, btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '⚡ Probe IP';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+function verifyGoogleKey(key, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Testing 10 Scopes...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/google-api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+    })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-check';
+
+        let badgeHtml = '';
+        let vClass = 'sev-low';
+        let vLabel = 'SECURE (RESTRICTED)';
+
+        if (data.active_scopes_count >= 5) {
+            badgeHtml = '<span class="res-badge res-open-rw res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🚨 CRITICAL: ' + data.active_scopes_count + ' / ' + data.total_tested + ' SCOPES ACTIVE!</span>';
+            vClass = 'sev-critical'; vLabel = 'CRITICAL UNRESTRICTED';
+        } else if (data.active_scopes_count > 0) {
+            badgeHtml = '<span class="res-badge res-open-ro res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚠️ HIGH: ' + data.active_scopes_count + ' / ' + data.total_tested + ' SCOPES ALLOWED</span>';
+            vClass = 'sev-high'; vLabel = 'HIGH PARTIALLY ALLOWED';
+        } else {
+            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 SECURE: ALL 10 SCOPES RESTRICTED</span>';
+            vClass = 'sev-low'; vLabel = 'RESTRICTED / SAFE';
+        }
+
+        let scopesHtml = '<div style="margin-top:8px; max-height:140px; overflow-y:auto; font-family:var(--font-mono); font-size:11px; background:var(--bg-card); padding:8px; border-radius:4px; border:1px solid var(--border);">';
+        (data.scopes || []).forEach(function(sc) {
+            const icon = sc.vulnerable ? '<span style="color:#22c55e; font-weight:700;">[✓ ACTIVE]</span>' : '<span style="color:#94a3b8;">[✗ DENIED]</span>';
+            scopesHtml += '<div style="padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.03);">' + icon + ' <strong>' + escHtml(sc.api) + '</strong>: ' + escHtml(sc.detail) + '</div>';
+        });
+        scopesHtml += '</div>';
+
+        resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-secondary);">' + escHtml(data.summary || '') + '</small>' + scopesHtml;
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        const hasActive = data.active_scopes_count > 0;
+        const borderClr = data.active_scopes_count >= 5 ? '#dc2626' : (hasActive ? '#f59e0b' : '#22c55e');
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + borderClr + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.summary || 'Hasil Pengujian Google Maps API') + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="margin-bottom:16px; background:var(--bg-secondary); padding:12px 16px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">Tested Google API Key (39 chars)</span><br><code style="color:#fbbf24; font-size:14px; font-weight:700;">' + escHtml(data.full_key || key) + '</code></div>';
+
+        modalHtml += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><strong style="color:var(--text-primary); font-size:13px;">Rincian Pengujian 10 Endpoint Google Maps &amp; Cloud API:</strong><span style="font-size:12px; color:var(--text-secondary);">' + (data.active_scopes_count || 0) + ' / ' + (data.total_tested || 10) + ' Active</span></div>';
+
+        modalHtml += '<div style="display:flex; flex-direction:column; gap:8px;">';
+        (data.scopes || []).forEach(function(sc) {
+            const isVuln = sc.vulnerable;
+            const cardBorder = isVuln ? '#22c55e' : 'var(--border)';
+            const cardBg = isVuln ? 'rgba(34,197,94,0.08)' : 'var(--bg-secondary)';
+            modalHtml += '<div style="background:' + cardBg + '; border:1px solid ' + cardBorder + '; padding:10px 14px; border-radius:6px;">';
+            modalHtml += '<div style="display:flex; justify-content:space-between; align-items:center;">';
+            modalHtml += '<strong style="font-size:13px; color:var(--text-primary);">' + escHtml(sc.api) + '</strong>';
+            modalHtml += '<span class="res-badge ' + (isVuln ? 'res-alive' : 'res-dead') + '" style="font-size:11px;">' + (isVuln ? '🟢 ACTIVE / ALLOWED' : '⚪ ACCESS DENIED') + '</span>';
+            modalHtml += '</div>';
+            modalHtml += '<div style="margin-top:4px; font-size:12px; color:' + (isVuln ? '#86efac' : 'var(--text-secondary)') + ';">' + escHtml(sc.detail) + '</div>';
+            modalHtml += '<div style="margin-top:4px; font-size:11px;"><code style="color:var(--text-muted); word-break:break-all;">' + escHtml(sc.url || '') + '</code></div>';
+            modalHtml += '</div>';
+        });
+        modalHtml += '</div></div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'Google Maps API Scope Security Audit (10 Endpoints)',
+            target: 'Google API Key: ' + (data.full_key || key),
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'google-api', (data.full_key || key), btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '🔑 Check Scopes';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+function verifyEndpoint(url, rowId) {
+    const btn = document.getElementById('btn_' + rowId);
+    const resEl = document.getElementById('res_' + rowId);
+    btn.classList.add('btn-testing');
+    btn.innerText = '⏳ Probing...';
+
+    fetch('/api/scan/' + SCAN_ID + '/verify/endpoint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+    })
+    .then(function(data) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '✓ Re-probe';
+
+        let badgeHtml = '';
+        let vClass = 'sev-info';
+        let vLabel = 'HTTP RESPONSE';
+
+        if (data.alive) {
+            const is2xx = data.status_code >= 200 && data.status_code < 400;
+            badgeHtml = '<span class="res-badge ' + (is2xx ? 'res-alive' : 'res-open-ro') + ' res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">HTTP ' + data.status_code + '</span>';
+            vClass = is2xx ? 'sev-low' : 'sev-high';
+            vLabel = 'HTTP ' + data.status_code + ' ONLINE';
+            resEl.innerHTML = badgeHtml + ' <small style="color:var(--text-secondary);">Server: ' + escHtml(data.server) + ' | ' + escHtml((data.content_type || '').split(';')[0]) + '</small>';
+        } else {
+            badgeHtml = '<span class="res-badge res-dead res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚪ OFFLINE / TIMEOUT</span>';
+            vClass = 'sev-info'; vLabel = 'OFFLINE / UNREACHABLE';
+            resEl.innerHTML = badgeHtml + '<br><small style="color:var(--text-muted);">' + escHtml(data.message) + '</small>';
+        }
+
+        let modalHtml = '<div style="margin-bottom:16px;">';
+        const is2xx = data.status_code >= 200 && data.status_code < 400;
+        const borderClr = data.alive ? (is2xx ? '#22c55e' : '#f59e0b') : '#64748b';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px 16px; border-radius:8px; border-left:4px solid ' + borderClr + '; margin-bottom:14px;">';
+        modalHtml += '<strong style="font-size:14px; color:var(--text-primary);">' + escHtml(data.message || 'Status Respon Endpoint') + '</strong>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:16px;">';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">HTTP STATUS</span><br><strong style="color:#38bdf8; font-size:16px;">' + (data.status_code ? 'HTTP ' + data.status_code : 'OFFLINE') + '</strong></div>';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">SERVER TECH</span><br><strong style="font-size:13px; color:var(--text-primary);">' + escHtml(data.server || '—') + '</strong></div>';
+        modalHtml += '<div style="background:var(--bg-secondary); padding:12px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">CONTENT TYPE</span><br><strong style="font-size:12px; color:var(--text-primary);">' + escHtml((data.content_type || '—').split(';')[0]) + '</strong></div>';
+        modalHtml += '</div>';
+
+        modalHtml += '<div style="margin-bottom:14px; background:var(--bg-secondary); padding:10px 14px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">Target Probed URL</span><br><code style="color:#38bdf8; font-size:12px; word-break:break-all;">' + escHtml(data.url || url) + '</code></div>';
+
+        if (data.headers && Object.keys(data.headers).length > 0) {
+            modalHtml += '<div style="margin-bottom:14px;"><strong style="color:var(--text-primary); font-size:13px;">Full Response Headers:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:11px; color:#c9d1d9; max-height:180px; overflow-y:auto; margin-top:6px;">';
+            Object.keys(data.headers).forEach(function(hk) {
+                modalHtml += escHtml(hk) + ': ' + escHtml(data.headers[hk]) + '\n';
+            });
+            modalHtml += '</pre></div>';
+        }
+
+        if (data.body_preview) {
+            modalHtml += '<div style="margin-top:14px;"><strong style="color:var(--text-primary); font-size:13px;">Sample Response Body Snippet:</strong><pre style="background:var(--bg-primary); padding:12px 16px; border-radius:6px; font-family:var(--font-mono); font-size:11px; color:#86efac; overflow-x:auto; max-height:220px; margin-top:6px;">' + escHtml(data.body_preview) + '</pre></div>';
+        }
+        modalHtml += '</div>';
+
+        window._verifyResultsData[rowId] = {
+            title: 'Endpoint Response Audit Report',
+            target: data.url || url,
+            verdictLabel: vLabel,
+            verdictClass: vClass,
+            contentHtml: modalHtml
+        };
+        persistVerifyResult(rowId, 'endpoint', (data.url || url), btn.innerText, resEl.innerHTML, window._verifyResultsData[rowId]);
+    })
+    .catch(function(err) {
+        btn.classList.remove('btn-testing');
+        btn.innerText = '⚡ Probe URL';
+        resEl.innerHTML = '<span style="color:var(--danger); font-size:12px;">Gagal: ' + escHtml(err.message) + '</span>';
+    });
+}
+
+/* ---------------------------------------------------------------
+   POPUP SOURCE CONTEXT (MODAL ±5 BARIS)
+--------------------------------------------------------------- */
+function openSecretModal(secretKey) {
+    const data = window._secretsData[secretKey];
+    if (!data) return;
+
+    const file = data.file || '';
+    const line = parseInt(data.line) || 0;
+    const matchVal = data.match || '';
+    const context = data.context || '';
+    const rule = data.rule || '';
+    const sev = data.sev || 'info';
+
+    document.getElementById('ctx-title').textContent = rule || 'Source Code Context';
+    document.getElementById('ctx-file').textContent = file ? (file.split(/[/\\]/).pop() + (line ? ':' + line : '')) : '';
+    document.getElementById('ctx-rule-label').textContent = rule;
+    document.getElementById('ctx-rule-label').className = 'ctx-rule-chip';
+    document.getElementById('ctx-severity-label').textContent = sev.toUpperCase();
+    document.getElementById('ctx-severity-label').className = 'ctx-sev-chip sev-' + sev.toLowerCase();
+    document.getElementById('ctx-match-label').textContent = 'Match: ' + (matchVal.length > 50 ? matchVal.substring(0, 50) + '…' : matchVal);
+
+    const modal = document.getElementById('ctx-modal');
+    modal.style.display = 'flex';
+
+    const inner = document.getElementById('ctx-code-inner');
+    inner.innerHTML = '<div class="ctx-loading">Mengambil baris source code (±5 baris)...</div>';
+
+    if (file && line > 0) {
+        const url = '/api/scan/' + SCAN_ID + '/source-context?file=' + encodeURIComponent(file) + '&line=' + line + '&match=' + encodeURIComponent(matchVal) + '&radius=5';
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.lines && res.lines.length > 0) {
+                    renderContextCodeLines(res.lines, res.target_line || line, matchVal);
+                } else {
+                    renderContextFallback(context, matchVal, line);
+                }
+            })
+            .catch(function() {
+                renderContextFallback(context, matchVal, line);
+            });
+    } else {
+        renderContextFallback(context, matchVal, line);
+    }
+}
+
+function renderContextCodeLines(lines, targetLine, matchVal) {
+    let html = '<div class="ctx-code-table">';
+    lines.forEach(function(item) {
+        const isTarget = item.no === targetLine;
+        const text = escHtml(item.text);
+
+        let highlightedText = text;
+        if (matchVal) {
+            const escapedMatch = escHtml(matchVal);
+            if (escapedMatch && text.includes(escapedMatch)) {
+                highlightedText = text.split(escapedMatch).join('<span class="ctx-highlight-code">' + escapedMatch + '</span>');
+            }
+        }
+
+        html += '<div class="ctx-code-row' + (isTarget ? ' ctx-row-target' : '') + '">';
+        html += '<span class="ctx-num">' + item.no + '</span>';
+        html += '<span class="ctx-code-text">' + highlightedText + '</span>';
+        html += '</div>';
+    });
+    html += '</div>';
+    document.getElementById('ctx-code-inner').innerHTML = html;
+}
+
+function renderContextFallback(contextStr, matchVal, line) {
+    const raw = contextStr || matchVal;
+    if (!raw) {
+        document.getElementById('ctx-code-inner').innerHTML = '<div class="ctx-loading">Context source code tidak tersedia.</div>';
+        return;
+    }
+
+    const lines = raw.split('\n');
+    let html = '<div class="ctx-code-table">';
+    const baseLine = line ? Math.max(1, line - Math.floor(lines.length / 2)) : 1;
+
+    lines.forEach(function(l, i) {
+        const lineNum = baseLine + i;
+        const text = escHtml(l);
+        let highlightedText = text;
+        if (matchVal) {
+            const escapedMatch = escHtml(matchVal);
+            if (escapedMatch && text.includes(escapedMatch)) {
+                highlightedText = text.split(escapedMatch).join('<span class="ctx-highlight-code">' + escapedMatch + '</span>');
+            }
+        }
+
+        const isTarget = (line && lineNum === line) || (matchVal && l.includes(matchVal));
+        html += '<div class="ctx-code-row' + (isTarget ? ' ctx-row-target' : '') + '">';
+        html += '<span class="ctx-num">' + lineNum + '</span>';
+        html += '<span class="ctx-code-text">' + highlightedText + '</span>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    document.getElementById('ctx-code-inner').innerHTML = html;
+}
+
+function closeCtxModal(event) {
+    if (event.target === document.getElementById('ctx-modal')) {
+        closeCtxModalDirect();
+    }
+}
+
+function closeCtxModalDirect() {
+    document.getElementById('ctx-modal').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeCtxModalDirect();
+        closeVerifyModalDirect();
+    }
+});
+
+/* ---------------------------------------------------------------
+   FULL REPORT ACCORDION & SEARCH FILTER (OVERVIEW TAB)
+--------------------------------------------------------------- */
+function toggleReportDetail() {
+    const wrapper = document.getElementById('full-report-wrapper');
+    const btn = document.getElementById('btn-toggle-report');
+    if (!wrapper) return;
+    if (wrapper.style.display === 'none' || wrapper.style.display === '') {
+        wrapper.style.display = 'block';
+        if (btn) btn.innerHTML = '▲ Sembunyikan Detail';
+    } else {
+        wrapper.style.display = 'none';
+        if (btn) btn.innerHTML = '🔍 Klik Detail Laporan ▼';
+    }
+}
+
+function filterReport() {
+    const query = document.getElementById('search-input').value.toLowerCase();
+    const report = document.getElementById('report-content');
+    if (!report) return;
+
+    if (!query) {
+        report.querySelectorAll('tr, p, li, h1, h2, h3, h4, code').forEach(function(el) {
+            el.style.opacity = '';
+        });
+        return;
+    }
+
+    report.querySelectorAll('tr').forEach(function(tr) {
+        const text = tr.textContent.toLowerCase();
+        tr.style.opacity = text.includes(query) ? '1' : '0.2';
+    });
+    report.querySelectorAll('code').forEach(function(c) {
+        const text = c.textContent.toLowerCase();
+        c.style.opacity = text.includes(query) ? '1' : '0.2';
+    });
+}
+
+function expandAll() {
+    document.querySelectorAll('.report-content details').forEach(function(d) { d.open = true; });
+}
+function collapseAll() {
+    document.querySelectorAll('.report-content details').forEach(function(d) { d.open = false; });
+}
+
+/* ---------------------------------------------------------------
+   GLOBAL EVENT DELEGATION
+--------------------------------------------------------------- */
+document.addEventListener('click', function(e) {
+    // 1. Secret Match Click -> Modal
+    const secretEl = e.target.closest('.clickable-secret');
+    if (secretEl) {
+        e.preventDefault();
+        const secretKey = secretEl.getAttribute('data-secret-key');
+        if (secretKey) {
+            openSecretModal(secretKey);
+        }
+        return;
+    }
+
+    // 2. Expandable .more-link in rendered report.md
+    const moreLink = e.target.closest('.more-link');
+    if (moreLink) {
+        e.preventDefault();
+        const existing = moreLink.nextElementSibling;
+        if (existing && existing.classList.contains('more-box')) {
+            existing.remove();
+            moreLink.classList.remove('expanded');
+            return;
+        }
+
+        const scanId = moreLink.dataset.scan;
+        const rule = moreLink.dataset.rule;
+        const url = rule ? ('/api/scan/' + scanId + '/rule/' + encodeURIComponent(rule)) : ('/api/scan/' + scanId + '/hosts');
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                const box = document.createElement('div');
+                box.className = 'more-box';
+                if (rule) {
+                    const head = document.createElement('div');
+                    head.className = 'more-head';
+                    head.textContent = 'Rule ' + rule + ' — total ' + (data.total || (data.findings ? data.findings.length : 0)) + ' lokasi';
+                    box.appendChild(head);
+                    (data.findings || []).forEach(function(f) {
+                        const row = document.createElement('div');
+                        row.className = 'more-row';
+                        row.innerHTML = '<span class="more-file">' + escHtml(f.file) + ':' + escHtml(f.line) + '</span><span class="more-match"> :: ' + escHtml(f.match) + '</span>';
+                        box.appendChild(row);
+                    });
+                } else {
+                    const head = document.createElement('div');
+                    head.className = 'more-head';
+                    head.textContent = 'Semua host — total ' + (data.total || (data.hosts ? data.hosts.length : 0));
+                    box.appendChild(head);
+                    (data.hosts || []).forEach(function(h) {
+                        const row = document.createElement('div');
+                        row.className = 'more-row';
+                        row.innerHTML = '<span class="more-file">' + escHtml(h.host || '') + (h.port ? ':' + h.port : '') + ' [' + escHtml(h.path_env || h.env || 'prod') + ']</span>';
+                        box.appendChild(row);
+                    });
+                }
+                moreLink.after(box);
+                moreLink.classList.add('expanded');
+            })
+            .catch(function(err) {
+                const box = document.createElement('div');
+                box.className = 'more-box';
+                box.textContent = 'Gagal memuat detail: ' + err.message;
+                moreLink.after(box);
+            });
+    }
+});
+
+// Jalankan inisialisasi
+document.addEventListener('DOMContentLoaded', initData);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    initData();
+}
+</script>
+{% endblock %}
