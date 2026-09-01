@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Scan #{{ scan.id }} - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div class="scan-page">
+    <h1>Scan #{{ scan.id }}</h1>
+    <p class="subtitle">{{ scan.filename }}</p>
+
+    <div class="scan-status-card">
+        <div class="scan-info">
+            <div class="info-row">
+                <span class="info-label">Status:</span>
+                <span class="status status-{{ scan.status }}" id="scan-status">
+                    {% if scan.status == 'completed' %}&#10003; Completed
+                    {% elif scan.status == 'running' %}&#9654; Running
+                    {% elif scan.status == 'failed' %}&#10007; Failed
+                    {% else %}&#9202; Pending{% endif %}
+                </span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Phase:</span>
+                <span id="scan-phase">{{ scan.phase or 'waiting...' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Progress:</span>
+                <div class="progress-bar progress-large">
+                    <div class="progress-fill" id="scan-progress" style="width: {{ scan.progress }}%"></div>
+                    <span class="progress-text" id="scan-progress-text">{{ scan.progress }}%</span>
+                </div>
+            </div>
+        </div>
+
+        {% if scan.error %}
+        <div class="error-box">
+            <h3>Error</h3>
+            <pre>{{ scan.error }}</pre>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="scan-logs">
+        <h2>Logs</h2>
+        <div class="log-container" id="log-container">
+            {% for log in logs %}
+            <div class="log-entry log-{{ log.level }}">
+                <span class="log-time">{{ log.timestamp[:19] if log.timestamp else '' }}</span>
+                <span class="log-level">[{{ log.level|upper }}]</span>
+                <span class="log-message">{{ log.message }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if scan.status == 'pending' %}
+    <div class="scan-actions">
+        <button class="btn btn-primary btn-lg" id="start-scan-btn">&#9654; Start Scan</button>
+        <p class="upload-hint">File sudah terupload, belum di-scan. Klik tombol untuk memulai ({{ 'Fast mode' if scan.fast_mode else 'Full mode (jadx)' }}).</p>
+    </div>
+    {% endif %}
+
+    {% if scan.status == 'completed' %}
+    <div class="scan-actions">
+        <a href="/results/{{ scan.id }}" class="btn btn-primary btn-lg">View Results</a>
+    </div>
+    {% endif %}
+</div>
+
+{% if scan.status == 'running' or scan.status == 'pending' %}
+<script>
+let scanStarted = {{ 'true' if scan.status == 'running' else 'false' }};
+let lastLogId = 0;
+let pollRunning = true;
+
+function addLogEntry(entry) {
+    const container = document.getElementById('log-container');
+    const div = document.createElement('div');
+    div.className = 'log-entry log-' + (entry.level || 'info');
+    const ts = (entry.timestamp || '').toString().slice(0, 19);
+    div.innerHTML = '<span class="log-time">' + ts + '</span>' +
+        '<span class="log-level">[' + (entry.level || 'INFO').toUpperCase() + ']</span>' +
+        '<span class="log-message"></span>';
+    div.querySelector('.log-message').textContent = entry.message || '';
+    container.appendChild(div);
+    if (entry.id) lastLogId = Math.max(lastLogId, entry.id);
+    container.scrollTop = container.scrollHeight;
+}
+
+function refreshLogs() {
+    fetch('/api/scan/{{ scan.id }}/logs?after=' + lastLogId)
+        .then(r => r.json())
+        .then(data => {
+            (data.logs || []).forEach(addLogEntry);
+        })
+        .catch(() => {});
+}
+
+function startScan() {
+    const btn = document.getElementById('start-scan-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+    fetch('/api/scan/{{ scan.id }}/start', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'started') {
+                scanStarted = true;
+                if (btn) btn.remove();
+                refreshStatus();
+            } else {
+                if (btn) { btn.disabled = false; btn.textContent = '&#9654; Start Scan'; }
+                alert('Gagal start: ' + (data.detail || 'unknown'));
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = '&#9654; Start Scan'; }
+            alert('Network error saat start scan');
+        });
+}
+
+function refreshStatus() {
+    if (!pollRunning) return;
+    fetch('/api/scan/{{ scan.id }}/status')
+        .then(r => r.json())
+        .then(data => {
+            const statusEl = document.getElementById('scan-status');
+            const phaseEl = document.getElementById('scan-phase');
+            const progressEl = document.getElementById('scan-progress');
+            const progressText = document.getElementById('scan-progress-text');
+
+            if (data.status === 'completed') {
+                pollRunning = false;
+                statusEl.innerHTML = '&#10003; Completed';
+                statusEl.className = 'status status-completed';
+                progressEl.style.width = '100%';
+                progressText.textContent = '100%';
+                setTimeout(() => { window.location.href = '/results/{{ scan.id }}'; }, 1500);
+                return;
+            }
+            if (data.status === 'failed') {
+                pollRunning = false;
+                statusEl.innerHTML = '&#10007; Failed';
+                statusEl.className = 'status status-failed';
+                phaseEl.textContent = 'failed';
+                return;
+            }
+            if (data.status === 'pending' && !scanStarted) {
+                statusEl.innerHTML = '&#9202; Pending';
+                statusEl.className = 'status status-pending';
+                phaseEl.textContent = 'waiting for start...';
+                progressEl.style.width = '0%';
+                progressText.textContent = '0%';
+                setTimeout(refreshStatus, 2000);
+                return;
+            }
+
+            statusEl.innerHTML = '&#9654; Running';
+            statusEl.className = 'status status-running';
+            phaseEl.textContent = data.phase || '...';
+            progressEl.style.width = (data.progress || 0) + '%';
+            progressText.textContent = (data.progress || 0) + '%';
+
+            setTimeout(refreshStatus, 2000);
+        })
+        .catch(() => setTimeout(refreshStatus, 3000));
+}
+
+document.getElementById('start-scan-btn')?.addEventListener('click', startScan);
+setInterval(refreshLogs, 3000);
+refreshLogs();
+refreshStatus();
+</script>
+{% endif %}
+{% endblock %}

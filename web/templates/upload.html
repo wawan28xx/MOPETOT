@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Upload - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div class="upload-page">
+    <h1>Upload File</h1>
+    <p class="subtitle">Upload an APK, IPA, or other mobile binary for analysis</p>
+
+    <div class="upload-zone" id="drop-zone">
+        <div class="upload-icon">&#128228;</div>
+        <p class="upload-text">Drag & drop your file here</p>
+        <p class="upload-hint">or click to browse</p>
+        <input type="file" id="file-input" accept=".apk,.aab,.ipa,.jar,.dex,.smali,.so,.dll,.exe,.hbc,.zip,.xapk,.apks,.apkm" hidden>
+    </div>
+
+    <div class="fast-mode-box">
+        <label class="fast-mode-label">
+            <input type="checkbox" id="fast-mode" checked>
+            <span><strong>Fast mode</strong> — skip jadx + blutter decompile (smali + assets + strings saja)</span>
+        </label>
+        <p class="upload-hint" style="margin-left:24px">2-5x lebih cepat. Skip jadx &amp; blutter (Dart symbol extraction). Untuk APK besar (50MB+) sangat disarankan. Hasil secret/endpoint tetap lengkap karena di-scan dari smali &amp; assets.</p>
+    </div>
+
+    <div id="upload-status" class="upload-status" style="display:none;">
+        <div class="upload-file-info">
+            <span id="file-name"></span>
+            <span id="file-size"></span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="upload-progress"></div>
+        </div>
+        <p id="upload-message"></p>
+    </div>
+
+    <div class="supported-formats">
+        <h3>Supported Formats</h3>
+        <div class="format-grid">
+            <div class="format-item">
+                <span class="format-icon">📱</span>
+                <span class="format-name">APK / AAB / XAPK</span>
+                <span class="format-desc">Android packages</span>
+            </div>
+            <div class="format-item">
+                <span class="format-icon">🍎</span>
+                <span class="format-name">IPA</span>
+                <span class="format-desc">iOS packages</span>
+            </div>
+            <div class="format-item">
+                <span class="format-icon">☕</span>
+                <span class="format-name">JAR</span>
+                <span class="format-desc">Java archives</span>
+            </div>
+            <div class="format-item">
+                <span class="format-icon">📦</span>
+                <span class="format-name">DEX / SO / DLL</span>
+                <span class="format-desc">Native binaries</span>
+            </div>
+            <div class="format-item">
+                <span class="format-icon">⚛️</span>
+                <span class="format-name">HBC</span>
+                <span class="format-desc">Hermes bytecode</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const uploadStatus = document.getElementById('upload-status');
+
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) {
+        uploadFile(e.dataTransfer.files[0]);
+    }
+});
+
+fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) {
+        uploadFile(fileInput.files[0]);
+    }
+});
+
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function uploadFile(file) {
+    uploadStatus.style.display = 'block';
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = formatSize(file.size);
+    document.getElementById('upload-message').textContent = 'Uploading...';
+    document.getElementById('upload-progress').style.width = '0%';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('fast', document.getElementById('fast-mode').checked ? '1' : '0');
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload', true);
+
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            document.getElementById('upload-progress').style.width = pct + '%';
+        }
+    };
+
+    xhr.onload = () => {
+        if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText);
+            document.getElementById('upload-message').textContent = 'Upload complete! Redirecting...';
+            document.getElementById('upload-progress').style.width = '100%';
+            setTimeout(() => {
+                window.location.href = '/scan/' + data.scan_id;
+            }, 500);
+        } else {
+            const err = JSON.parse(xhr.responseText);
+            document.getElementById('upload-message').textContent = 'Error: ' + (err.detail || 'Upload failed');
+            document.getElementById('upload-progress').style.width = '0%';
+        }
+    };
+
+    xhr.onerror = () => {
+        document.getElementById('upload-message').textContent = 'Network error';
+    };
+
+    xhr.send(formData);
+}
+</script>
+{% endblock %}

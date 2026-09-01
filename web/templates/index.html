@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div id="dashboard-root" class="dashboard-shell"
+     data-page="{{ page }}"
+     data-per-page="{{ per_page }}"
+     data-search="{{ search or '' }}"
+     data-platform="{{ platform or 'all' }}"
+     data-status="{{ status or 'all' }}">
+    <section class="dash-hero">
+        <div>
+            <h1>Dashboard</h1>
+            <p>Monitoring hasil scan mobile audit secara real-time.</p>
+        </div>
+        <div class="dash-hero-actions">
+            <a href="/compare" class="btn btn-secondary">Compare</a>
+            <a href="/history" class="btn">History</a>
+            <a href="/upload" class="btn btn-primary">+ New Scan</a>
+        </div>
+    </section>
+
+    <section class="dash-kpi-grid" id="dash-kpi-grid">
+        <button type="button" class="dash-kpi active" data-status="all">
+            <span class="dash-kpi-label">Total Scans</span>
+            <span class="dash-kpi-value" id="kpi-total" data-value="{{ stats.total_scans or 0 }}">{{ stats.total_scans or 0 }}</span>
+        </button>
+        <button type="button" class="dash-kpi" data-status="completed">
+            <span class="dash-kpi-label">Completed</span>
+            <span class="dash-kpi-value is-success" id="kpi-completed" data-value="{{ stats.completed or 0 }}">{{ stats.completed or 0 }}</span>
+        </button>
+        <button type="button" class="dash-kpi" data-status="running">
+            <span class="dash-kpi-label">Running</span>
+            <span class="dash-kpi-value is-warning" id="kpi-running" data-value="{{ stats.running or 0 }}">{{ stats.running or 0 }}</span>
+        </button>
+        <button type="button" class="dash-kpi" data-status="failed">
+            <span class="dash-kpi-label">Failed</span>
+            <span class="dash-kpi-value is-danger" id="kpi-failed" data-value="{{ stats.failed or 0 }}">{{ stats.failed or 0 }}</span>
+        </button>
+    </section>
+
+    <section class="dash-panel">
+        <header class="dash-panel-head">
+            <div>
+                <h2>Recent Scans</h2>
+                <p id="dash-last-update">Belum ada update.</p>
+            </div>
+            <div class="dash-toolbar">
+                <div class="dash-search-wrap">
+                    <input id="dash-search" type="text" placeholder="Cari file/package..." autocomplete="off">
+                    <button id="dash-search-clear" type="button" title="Clear">x</button>
+                </div>
+
+                <div class="dash-tab-group" id="dash-platform-group">
+                    <button type="button" class="active" data-platform="all">Semua</button>
+                    <button type="button" data-platform="android">Android</button>
+                    <button type="button" data-platform="ios">iOS</button>
+                </div>
+
+                <select id="dash-per-page" class="dash-select">
+                    <option value="10">10 / page</option>
+                    <option value="25">25 / page</option>
+                    <option value="50">50 / page</option>
+                </select>
+
+                <button id="dash-refresh" type="button" class="btn">Refresh</button>
+            </div>
+        </header>
+
+        <div class="dash-table-wrap">
+            <table class="dash-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>FILE</th>
+                        <th>PLATFORM</th>
+                        <th>STATUS</th>
+                        <th>PROGRESS</th>
+                        <th>CREATED</th>
+                        <th class="is-right">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody id="dash-table-body">
+                    {% if scans %}
+                        {% for s in scans %}
+                        <tr class="dash-row" data-route="{{ '/results/' ~ s.id if s.status == 'completed' else '/scan/' ~ s.id }}">
+                            <td><code>#{{ s.id }}</code></td>
+                            <td>
+                                <div class="dash-file">
+                                    <strong title="{{ s.filename }}">{{ s.filename }}</strong>
+                                    <span>{{ s.file_type or '-' }}</span>
+                                </div>
+                            </td>
+                            <td><span class="dash-pill dash-pill-{{ (s.platform or 'unknown')|lower }}">{{ (s.platform or 'unknown')|lower }}</span></td>
+                            <td><span class="dash-status dash-status-{{ (s.status or 'pending')|lower }}">{{ (s.status or 'pending')|lower }}</span></td>
+                            <td>
+                                <div class="dash-progress">
+                                    <div style="width: {{ s.progress or 0 }}%"></div>
+                                    <span>{{ s.progress or 0 }}%</span>
+                                </div>
+                            </td>
+                            <td>{{ s.created_at[:16] if s.created_at else '-' }}</td>
+                            <td class="is-right">
+                                {% if s.status == 'completed' %}
+                                    <a class="btn btn-sm btn-primary" href="/results/{{ s.id }}">Results</a>
+                                {% else %}
+                                    <a class="btn btn-sm" href="/scan/{{ s.id }}">Progress</a>
+                                {% endif %}
+                                <button type="button" class="dash-delete" data-id="{{ s.id }}" title="Hapus">x</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="7" class="dash-placeholder">Belum ada data scan.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <footer class="dash-footer">
+            <p id="dash-summary">Menunggu data...</p>
+            <div id="dash-pagination" class="dash-pagination"></div>
+        </footer>
+    </section>
+</div>
+
+<script>
+(function () {
+    var root = document.getElementById("dashboard-root");
+    if (!root) return;
+
+    var state = {
+        page: parseInt(root.dataset.page || "1", 10) || 1,
+        perPage: parseInt(root.dataset.perPage || "10", 10) || 10,
+        search: root.dataset.search || "",
+        platform: root.dataset.platform || "all",
+        status: root.dataset.status || "all",
+        total: 0,
+        totalPages: 1,
+        loading: false
+    };
+
+    var refs = {
+        body: document.getElementById("dash-table-body"),
+        summary: document.getElementById("dash-summary"),
+        pagination: document.getElementById("dash-pagination"),
+        search: document.getElementById("dash-search"),
+        searchClear: document.getElementById("dash-search-clear"),
+        perPage: document.getElementById("dash-per-page"),
+        refresh: document.getElementById("dash-refresh"),
+        lastUpdate: document.getElementById("dash-last-update"),
+        kpiTotal: document.getElementById("kpi-total"),
+        kpiCompleted: document.getElementById("kpi-completed"),
+        kpiRunning: document.getElementById("kpi-running"),
+        kpiFailed: document.getElementById("kpi-failed"),
+        platformGroup: document.getElementById("dash-platform-group")
+    };
+
+    var searchDebounce = null;
+    var pollTimer = null;
+    var reqCounter = 0;
+    var loadWatchdog = null;
+
+    function esc(v) {
+        return String(v || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function animateCount(el, target) {
+        if (!el) return;
+        var start = parseInt(el.textContent || "0", 10) || 0;
+        if (start === target) return;
+        var t0 = performance.now();
+        var duration = 380;
+
+        function step(t) {
+            var p = Math.min((t - t0) / duration, 1);
+            var eased = 1 - Math.pow(1 - p, 3);
+            el.textContent = Math.round(start + (target - start) * eased);
+            if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    function setLastUpdate() {
+        if (!refs.lastUpdate) return;
+        var d = new Date();
+        refs.lastUpdate.textContent = "Update terakhir: " + d.toLocaleTimeString("id-ID");
+    }
+
+    function setLoadingText(msg) {
+        if (!refs.lastUpdate) return;
+        refs.lastUpdate.textContent = msg;
+    }
+
+    function applyActiveStatus() {
+        document.querySelectorAll(".dash-kpi").forEach(function (btn) {
+            btn.classList.toggle("active", btn.dataset.status === state.status);
+        });
+    }
+
+    function applyActivePlatform() {
+        if (!refs.platformGroup) return;
+        refs.platformGroup.querySelectorAll("button").forEach(function (btn) {
+            btn.classList.toggle("active", btn.dataset.platform === state.platform);
+        });
+    }
+
+    function syncUrl() {
+        var url = new URL(window.location.href);
+        url.searchParams.set("page", String(state.page));
+        url.searchParams.set("per_page", String(state.perPage));
+        if (state.search) url.searchParams.set("search", state.search);
+        else url.searchParams.delete("search");
+        if (state.platform && state.platform !== "all") url.searchParams.set("platform", state.platform);
+        else url.searchParams.delete("platform");
+        if (state.status && state.status !== "all") url.searchParams.set("status", state.status);
+        else url.searchParams.delete("status");
+        history.replaceState({}, "", url.toString());
+    }
+
+    function renderEmpty() {
+        refs.body.innerHTML = [
+            '<tr><td colspan="7" class="dash-empty">',
+            '<strong>Tidak ada data yang cocok.</strong>',
+            '<span>Coba ganti filter atau clear pencarian.</span>',
+            '<button type="button" class="btn btn-sm" id="dash-reset-filter">Reset Filter</button>',
+            '</td></tr>'
+        ].join("");
+
+        var resetBtn = document.getElementById("dash-reset-filter");
+        if (resetBtn) {
+            resetBtn.addEventListener("click", function () {
+                state.search = "";
+                state.platform = "all";
+                state.status = "all";
+                state.page = 1;
+                refs.search.value = "";
+                refs.searchClear.hidden = true;
+                applyActiveStatus();
+                applyActivePlatform();
+                loadScansData();
+            });
+        }
+    }
+
+    function renderRows(rows) {
+        if (!rows || !rows.length) {
+            renderEmpty();
+            return;
+        }
+
+        var html = rows.map(function (s) {
+            var platform = (s.platform || "unknown").toLowerCase();
+            var status = (s.status || "pending").toLowerCase();
+            var fileType = esc(s.file_type || "-");
+            var filename = esc(s.filename || "-");
+            var progress = Math.max(0, Math.min(100, parseInt(s.progress || 0, 10)));
+            var createdAt = s.created_at ? esc(String(s.created_at).slice(0, 16)) : "-";
+            var route = status === "completed" ? ("/results/" + s.id) : ("/scan/" + s.id);
+            var action = status === "completed"
+                ? '<a class="btn btn-sm btn-primary" href="/results/' + s.id + '">Results</a>'
+                : '<a class="btn btn-sm" href="/scan/' + s.id + '">Progress</a>';
+
+            return [
+                '<tr class="dash-row" data-route="' + route + '">',
+                '<td><code>#' + s.id + '</code></td>',
+                '<td><div class="dash-file">',
+                '<strong>' + filename + '</strong>',
+                '<span>' + fileType + '</span>',
+                '</div></td>',
+                '<td><span class="dash-pill dash-pill-' + platform + '">' + esc(platform) + '</span></td>',
+                '<td><span class="dash-status dash-status-' + status + '">' + esc(status) + '</span></td>',
+                '<td><div class="dash-progress"><div style="width:' + progress + '%"></div><span>' + progress + '%</span></div></td>',
+                '<td>' + createdAt + '</td>',
+                '<td class="is-right">' + action +
+                    '<button type="button" class="dash-delete" data-id="' + s.id + '" title="Hapus">x</button>' +
+                '</td>',
+                '</tr>'
+            ].join("");
+        }).join("");
+
+        refs.body.innerHTML = html;
+    }
+
+    function renderPagination() {
+        if (!state.total) {
+            refs.pagination.innerHTML = "";
+            refs.summary.textContent = "Tidak ada data.";
+            return;
+        }
+
+        var start = (state.page - 1) * state.perPage + 1;
+        var end = Math.min(state.total, state.page * state.perPage);
+        refs.summary.textContent = "Menampilkan " + start + " - " + end + " dari " + state.total + " scan";
+
+        var items = [];
+        items.push('<button type="button" class="dash-page-btn' + (state.page === 1 ? ' disabled' : '') + '" data-page="1">&laquo;</button>');
+        items.push('<button type="button" class="dash-page-btn' + (state.page === 1 ? ' disabled' : '') + '" data-page="' + (state.page - 1) + '">&lsaquo; Prev</button>');
+
+        for (var i = 1; i <= state.totalPages; i++) {
+            if (i === state.page) {
+                items.push('<button type="button" class="dash-page-num active" data-page="' + i + '">' + i + '</button>');
+            } else if (i === 1 || i === state.totalPages || (i >= state.page - 2 && i <= state.page + 2)) {
+                items.push('<button type="button" class="dash-page-num" data-page="' + i + '">' + i + '</button>');
+            } else if (i === state.page - 3 || i === state.page + 3) {
+                items.push('<span class="dash-page-dots">...</span>');
+            }
+        }
+
+        items.push('<button type="button" class="dash-page-btn' + (state.page === state.totalPages ? ' disabled' : '') + '" data-page="' + (state.page + 1) + '">Next &rsaquo;</button>');
+        items.push('<button type="button" class="dash-page-btn' + (state.page === state.totalPages ? ' disabled' : '') + '" data-page="' + state.totalPages + '">&raquo;</button>');
+
+        refs.pagination.innerHTML = items.join("");
+    }
+
+    function updateStats(stats) {
+        if (!stats) return;
+        animateCount(refs.kpiTotal, parseInt(stats.total_scans || 0, 10));
+        animateCount(refs.kpiCompleted, parseInt(stats.completed || 0, 10));
+        animateCount(refs.kpiRunning, parseInt(stats.running || 0, 10));
+        animateCount(refs.kpiFailed, parseInt(stats.failed || 0, 10));
+
+        if (parseInt(stats.running || 0, 10) > 0) {
+            if (!pollTimer) {
+                pollTimer = setInterval(function () { loadScansData(true); }, 5000);
+            }
+        } else if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    async function fetchWithTimeout(url, options, timeoutMs) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+        try {
+            var reqOptions = options || {};
+            reqOptions.signal = controller.signal;
+            return await fetch(url, reqOptions);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async function loadScansData(silent) {
+        if (state.loading) return;
+        reqCounter += 1;
+        var thisReq = reqCounter;
+        state.loading = true;
+        if (!silent) {
+            setLoadingText("Sinkronisasi data scan...");
+        }
+
+        if (loadWatchdog) {
+            clearTimeout(loadWatchdog);
+            loadWatchdog = null;
+        }
+        loadWatchdog = setTimeout(function () {
+            state.loading = false;
+            setLoadingText("Load data timeout. Menampilkan data terakhir.");
+        }, 9000);
+
+        try {
+            var query = new URLSearchParams({
+                page: String(state.page),
+                per_page: String(state.perPage),
+                search: state.search,
+                platform: state.platform,
+                status: state.status
+            });
+
+            var res = await fetchWithTimeout('/api/scans?' + query.toString(), { headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }, 8000);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+
+            // Ignore stale async response
+            if (thisReq !== reqCounter) return;
+
+            state.total = parseInt(data.total || 0, 10);
+            state.totalPages = Math.max(1, parseInt(data.total_pages || 1, 10));
+            state.page = Math.min(Math.max(1, parseInt(data.page || 1, 10)), state.totalPages);
+
+            renderRows(data.scans || []);
+            renderPagination();
+            updateStats(data.stats || {});
+            setLastUpdate();
+            syncUrl();
+        } catch (e) {
+            if (refs.lastUpdate) {
+                refs.lastUpdate.textContent = 'Gagal load data live: ' + esc(e.message) + ' (menampilkan data terakhir).';
+            }
+        } finally {
+            if (loadWatchdog) {
+                clearTimeout(loadWatchdog);
+                loadWatchdog = null;
+            }
+            state.loading = false;
+        }
+    }
+
+    refs.search.value = state.search;
+    refs.searchClear.hidden = !state.search;
+    refs.perPage.value = String(state.perPage);
+    applyActiveStatus();
+    applyActivePlatform();
+
+    refs.search.addEventListener('input', function () {
+        refs.searchClear.hidden = !refs.search.value;
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(function () {
+            state.search = refs.search.value.trim();
+            state.page = 1;
+            loadScansData();
+        }, 250);
+    });
+
+    refs.searchClear.addEventListener('click', function () {
+        refs.search.value = '';
+        refs.searchClear.hidden = true;
+        state.search = '';
+        state.page = 1;
+        loadScansData();
+    });
+
+    refs.perPage.addEventListener('change', function () {
+        state.perPage = parseInt(refs.perPage.value, 10) || 10;
+        state.page = 1;
+        loadScansData();
+    });
+
+    refs.refresh.addEventListener('click', function () { loadScansData(); });
+
+    document.getElementById('dash-kpi-grid').addEventListener('click', function (e) {
+        var btn = e.target.closest('.dash-kpi');
+        if (!btn) return;
+        state.status = btn.dataset.status || 'all';
+        state.page = 1;
+        applyActiveStatus();
+        loadScansData();
+    });
+
+    refs.platformGroup.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-platform]');
+        if (!btn) return;
+        state.platform = btn.dataset.platform || 'all';
+        state.page = 1;
+        applyActivePlatform();
+        loadScansData();
+    });
+
+    refs.pagination.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-page]');
+        if (!btn || btn.classList.contains('disabled')) return;
+        var nextPage = parseInt(btn.dataset.page, 10);
+        if (!nextPage || nextPage === state.page) return;
+        state.page = Math.max(1, Math.min(nextPage, state.totalPages));
+        loadScansData();
+    });
+
+    refs.body.addEventListener('click', async function (e) {
+        var del = e.target.closest('.dash-delete');
+        if (del) {
+            e.preventDefault();
+            e.stopPropagation();
+            var id = del.dataset.id;
+            if (!confirm('Hapus scan #' + id + '?')) return;
+            var resp = await fetch('/api/scan/' + id, { method: 'DELETE' });
+            if (resp.ok) loadScansData();
+            return;
+        }
+
+        if (e.target.closest('a,button,input,select')) return;
+        var row = e.target.closest('.dash-row[data-route]');
+        if (!row) return;
+        window.location.href = row.dataset.route;
+    });
+
+    loadScansData(true);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,265 @@
+Berikut adalah hasil analisis mendalam terhadap tools Mobile Auditor yang telah Anda bangun, mencakup analisis arsitektur saat ini, kekurangan/gap yang masih ada, serta potensi dan roadmap pengembangan berdaya guna tinggi (high-impact) untuk bug bounty maupun corporate pentest.
+📊 1. Evaluasi Arsitektur Saat Ini (Strengths)
+Komponen	Status Saat Ini	Nilai Plus
+Multi-Engine Unpacker	apk, ipa, dex, so, pe, hbc, flutter, unity	Sangat luas; mencakup framework modern (React Native Hermes, Flutter Blutter, Unity Il2Cpp).
+Noise Filtering	is_library_source(), LIBRARY_NOISE_PATHS	Mengurangi false positive dari library 3rd-party (androidx, google, okhttp).
+Regex Database	87+ rules di rules/secrets.json + verifier	Mendeteksi cloud keys, payment gateway, private keys, endpoint environment.
+Web Interface & DB	FastAPI + SQLite + Tab Viewer + ±5 baris context modal	UI cepat, responsif, dan memudahkan review kode tanpa perlu membuka IDE decompiler terpisah.
+⚠️ 2. Kekurangan & Kelemahan Saat Ini (Current Gaps)
+A. Analisis Statis Masih Berbasis Regex (Belum Ada Data-Flow / Taint Tracking)
+- Kondisi Saat Ini: Scanner saat ini mencari string match via regex (Pattern Matching).
+- Kekurangan: Belum bisa mendeteksi apakah data dari luar (Intent, Deep Link, query params) mengalir ke sink berbahaya seperti:
+- WebView.loadUrl(untrustedUrl) $\rightarrow$ XSS / Intent Scheme Hijacking
+- Runtime.getRuntime().exec(untrustedCmd) $\rightarrow$ Command Injection
+- ContentProvider.openFile() $\rightarrow$ Path Traversal / Arbitrary File Read
+- addJavascriptInterface(obj, "bridge") pada target SDK rendah $\rightarrow$ RCE.
+B. Belum Ada Verifikasi Kunci Otomatis (Live Key Verification)
+- Kondisi Saat Ini: Ketika menemukan AIzaSy... (Google API Key) atau AKIA... (AWS Key), scanner hanya menandai sebagai temuan.
+- Kekurangan: Di bug bounty, unrestricted/sensitive key yang bernilai bounty (P1–P3) adalah yang memiliki akses data atau billing, sedangkan Google Map API key publik sering berstatus Informational / Not Applicable. Belum ada fitur auto-ping/checker untuk membuktikan exploitability kunci tersebut.
+C. Kedalaman Analisis iOS / IPA Masih Tertinggal Dibanding Android
+- Kondisi Saat Ini: Android sudah memiliki decompilation Java/Smali lengkap (jadx, apktool), sedangkan iOS baru sebatas parsing Info.plist dan ekstraksi string Mach-O (rabin2).
+- Kekurangan: Belum ada ekstraksi:
+- Class-dump (Objective-C runtime / Swift symbol demangling).
+- Analisis App Transport Security (ATS) exceptions.
+- Entitlements extraction (aps-environment, keychain-access-groups).
+- Hardcoded URL/Secret di dalam file .nib / compiled asset catalogs.
+D. Rules Kriptografi & Insecure Coding Masih Minim
+- Belum ada rule SAST untuk mendeteksi:
+- Mode enkripsi lemah: AES/ECB/PKCS5Padding (ECB mode mudah didekripsi polanya).
+- Hardcoded IV/Key: new SecretKeySpec("1234567812345678".getBytes(), "AES").
+- Insecure Random: Penggunaan java.util.Random alih-alih SecureRandom untuk token sesi.
+- Insecure TrustManager: TrustAllCerts / ALLOW_ALL_HOSTNAME_VERIFIER (Bypass SSL bawaan app).
+- Mutable PendingIntent: Android 12+ flag FLAG_MUTABLE tanpa explicit component.
+E. Format Export Laporan Masih Terbatas
+- Saat ini baru mendukung download format Markdown (.md).
+- Belum ada export PDF, JSON SARIF (standar industri untuk GitHub Security/GitLab CI), atau template khusus HackerOne / Bugcrowd / Intigriti format.
+🚀 3. Potensi & Fitur yang Sangat Bagus Dikembangkan (Roadmap)
+                       ┌──────────────────────────────────────┐
+                       │      MOBILE AUDITOR EVOLUTION        │
+                       └──────────────────┬───────────────────┘
+                                          │
+       ┌──────────────────┬───────────────┴───────────────┬──────────────────┐
+       ▼                  ▼                               ▼                  ▼
+┌──────────────┐   ┌──────────────┐                ┌──────────────┐   ┌──────────────┐
+│  LIVE KEY    │   │  EXPLOIT/PoC │                │ DYNAMIC &    │   │  CI/CD &     │
+│  VERIFIER    │   │  GENERATOR   │                │ FRIDA GEN    │   │  AI TRIAGER  │
+└──────────────┘   └──────────────┘                └──────────────┘   └──────────────┘
+1. 🔥 Live Secret Verifier Engine (Nilai Tertinggi untuk Bug Bounty) (DONE✅)
+Tambahkan opsi/tombol di UI atau CLI (--verify-secrets) untuk menguji dampak temuan secara pasif/aman:
+- Firebase Database: Auto-check https://<db>.firebaseio.com/.json (apakah open read/write?).
+- Google Maps / Cloud API: Auto-probe API scopes via Google APIs Client (apakah Geocoding, Places, Direction aktif tanpa referer restriction?).
+- AWS Key: Auto-run aws sts get-caller-identity menggunakan API REST langsung.
+- Stripe Key: Cek format pk_live_ vs sk_live_ (Secret Key vs Publishable Key).
+- Slack / Discord Webhook: Validasi webhook aktif.
+2. ⚡ Automated PoC Generator (One-Click PoC) (DONE✅)
+Dari hasil analisis Manifest & Deep Links, generate command PoC otomatis yang bisa langsung di-copy oleh hunter:
+- Exported Activity: 
+adb shell am start -n com.app.pkg/com.app.pkg.AdminActivity --ez "is_admin" true
+- Deep Link Trigger:
+adb shell am start -a android.intent.action.VIEW -d "myapp://auth/callback?token=payload"
+- Exported Broadcast Receiver / Service: Auto-generate template intent payload.
+3. 💉 Dynamic Companion & Auto-Frida Script Generator (ON PROGRESS)
+Jika APKiD mendeteksi RASP / Root Detection / SSL Pinning, tools otomatis men-generate file hooks.js yang siap dijalankan:
+- Auto-generate Frida script untuk:
+- Bypass OkHttp3 CertificatePinner.
+- Bypass TrustManagerImpl.
+- Hook SharedPreferences & SQLite Database key derivation.
+- Dump dynamic AES key saat fungsi runtime enkripsi dipanggil.
+4. 📱 ADB Device Bridge (Semi-Dynamic Inspector)
+Tambahkan tab/fitur "Live Device Inspector" yang terhubung via ADB:
+- One-click install APK ke emulator/device.
+- One-click pull direktori /data/data/<package_name>/ (membaca SharedPreferences plaintext, SQLite database tanpa enkripsi, cached webview files).
+- Test fitur allowBackup=true dengan menjalankan adb backup untuk melihat apakah data sensitif bisa di-ekstrak tanpa root.
+5. 🤖 AI-Powered Vulnerability Explainer & Report Drafter
+Integrasikan LLM lokal (Ollama / Claude / OpenAI API):
+- Ketika user melihat popup source context (±5 baris), ada tombol "Explain Vulnerability & Impact".
+- AI membaca potongan kode Java/Smali tersebut dan memberikan:
+1. Kenapa ini rentan?
+2. Bagaimana skenario eksploitasinya?
+3. Draft deskripsi laporan siap submit ke Bug Bounty (Lengkap dengan langkah reproduksi).
+6. 🛡️ Export ke Standard SARIF & CI/CD Mode
+- Tambahkan output format --format sarif agar tool ini bisa dipasang di GitHub Actions / GitLab CI pipeline sebagai automated mobile security linter.
+📋 Rekomendasi Prioritas Pengembangan
+Prioritas	Fitur	Effort	Dampak / Value
+P1 (Segera)	Live Secret Verifier (Firebase .json, Google Maps API scopes, AWS test)	Sedang	⭐️⭐️⭐️⭐️⭐️ (Langsung menghasilkan valid bug)
+P1 (Segera)	PoC Generator (Generate command adb am start untuk exported components & deeplinks)	Rendah	⭐️⭐️⭐️⭐️⭐️ (Sangat hemat waktu hunting)
+P2	SAST Rules Tambahan (Kriptografi lemah, Insecure WebView, Mutable PendingIntent)	Rendah	⭐️⭐️⭐️⭐️ (Menambah temuan vulnerabilitas)
+P2	Frida Script Auto-Generator berdasarkan proteksi APKiD	Sedang	⭐️⭐️⭐️⭐️ (Mempercepat bypass proteksi)
+P3	Live ADB Device Bridge (Inspect SharedPreferences & SQLite database)	Tinggi	⭐️⭐️⭐️⭐️ (Menuju hybrid dynamic testing)
+
+
+
+
+
+
+
+Berikut adalah hasil analisis mendalam dan komprehensif terhadap repository Droid LLM Hunter (DLH v1.3.0) yang tersimpan di C:\platform-tools\droid-llm-hunter-main, beserta perbandingannya dengan tools Mobile Auditor yang telah Anda bangun.
+🧠 1. Apa itu Droid LLM Hunter (DLH)?
+Droid LLM Hunter adalah scanner keamanan Android khusus yang mengkombinasikan Static Analysis (SAST Regex) dengan Kecerdasan LLM (Large Language Model) untuk memvalidasi vulnerabilitas tingkat logika dan menghasilkan Proof of Concept (PoC) / Exploit otomatis.
+🌟 2. Keunggulan & Fitur Kunci Droid LLM Hunter
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       DROID LLM HUNTER SCAN WORKFLOW                        │
+├─────────────────┬─────────────────┬──────────────────────┬──────────────────┤
+│ 1. Decompile    │ 2. Smart Filter │ 3. Context Injection │ 4. LLM & PoC Gen │
+│ (JADX + Apktool)│ (Regex Pattern) │ (Smali Call Graph)   │ (Auto Exploit)   │
+└─────────────────┴─────────────────┴──────────────────────┴──────────────────┘
+A. Two-Stage Hybrid Architecture (Hemat Biaya Token)
+- Stage 1 (Local Regex Filter): Memindai kode lokal secara instan (0 token) menggunakan detection_pattern di file YAML (misal: PendingIntent + FLAG_MUTABLE / 33554432). File yang tidak cocok langsung dibuang.
+- Stage 2 (LLM Context Verifier): Hanya file yang lolos Stage 1 yang dikirim ke LLM untuk memastikan apakah ada sanitasi atau benar-benar rentan.
+B. Smali Call Graph Builder (core/call_graph.py)
+- Membaca file .smali untuk memetakan hubungan pemanggilan fungsi (invoke-* -> Lclass;->method()).
+- Ketika suatu file rentan dianalisis, DLH menyuntikkan konteks siapa yang memanggil fungsi ini (Caller) dan fungsi apa yang dipanggil (Callee) ke prompt LLM agar AI paham alur data secara utuh.
+C. Auto-Exploit & PoC Generator (config/prompts/exploit_prompt.txt)
+- Tidak hanya melabeli bug, DLH meminta model LLM khusus (bisa dipisah dari model scanner) untuk membuat Payload / Command Eksploitasi siap pakai (misal: adb shell am start -a ..., exploit HTML WebView XSS, PoC broadcast).
+D. Multi-Provider LLM & Content-Addressed Caching
+- Mendukung 7 provider: Ollama (Lokal/Offline), Groq, OpenAI, Gemini, Claude, OpenRouter, dan Router9.
+- Response Cache (output/.dlh_cache/): Menyimpan hash dari (model + prompt + code). Jika scan terputus atau dijalankan ulang pada file yang sama, hasilnya instan dan 0 token cost.
+E. OWASP MASVS Enrichment (masvs_mapping.json)
+- Setiap rule (ada 27+ rules YAML) langsung dipetakan ke standar OWASP MASVS ID, deskripsi risiko, dan link referensi resmi.
+⚠️ 3. Kekurangan & Keterbatasan Droid LLM Hunter
+1. Hanya Mendukung Android APK:
+- DLH tidak mendukung iOS (IPA), React Native Hermes (.hbc), Flutter (libapp.so), Unity (IL2CPP), atau file biner native murni.
+2. Ketergantungan Kuat pada API LLM:
+- Jika token habis, kena rate limit, atau LLM mengalami halusinasi, scan bisa gagal/terhambat.
+3. Database Secret Masih Sedikit:
+- DLH hanya memiliki rule rahasia dasar (hardcoded_secrets.yaml), tidak memiliki regex database rahasia selengkap tools Anda (87+ rules cloud, crypto, DB, JWT, gateway).
+4. Tidak Memiliki Web Dashboard Terintegrasi:
+- CLI output dan JSON report; Web dashboard-nya dibuat di repository terpisah (dashboard-report-dlh).
+⚔️ 4. Komparasi: Tool Anda (Mobile Auditor) vs Droid LLM Hunter
+Fitur / Parameter	Tool Anda (Mobile Auditor)	Droid LLM Hunter (DLH)
+Cakupan Platform	🏆 Sangat Luas (Android, iOS IPA, Hermes HBC, Flutter, Unity, .NET, Native SO)	Terbatas (Android APK/AAB saja)
+Kecepatan Scan	⚡ Sangat Cepat (Lokal 100%, multi-process)	⏳ Lebih Lambat (Menunggu antrian response LLM API)
+Biaya Operasional	💰 100% Gratis (Tanpa API Key / Token)	💳 Membutuhkan Token LLM (kecuali Ollama lokal)
+Analisis Logika & Sink	❌ Regex Pattern Matching murni	🏆 Context-Aware AI Review (Paham kontrol alur & sanitasi)
+Exploit / PoC Generator	❌ Belum ada	🏆 Auto-Generate PoC & ADB Command
+Secret Scanning DB	🏆 Sangat Lengkap (87+ Rules + Context ±5 baris)	⚠️ Dasar (Beberapa rule umum)
+Web UI & Source Viewer	🏆 Bawaan (FastAPI + Modal ±5 Baris)	⚠️ Terpisah (Perlu repo dashboard terpisah)
+Call Graph Tracking	❌ Belum ada	🏆 Ada (Smali Call Graph Builder)
+💡 5. Apa yang Bisa Diadopsi / Di-ATM (Amati, Tiru, Modifikasi) ke Tool Anda?
+Struktur DLH sangat bagus untuk dijadikan referensi upgrade pada Mobile Auditor Anda:
+1. Adopsi 27 Rule YAML Android DLH ke Tool Anda:
+- Aturan seperti strandhogg.yaml, pending_intent_hijacking.yaml, zip_slip.yaml, deeplink_logic_bypass.yaml, dan insecure_webview.yaml bisa diporting polanya (detection_pattern) ke scanner regex Anda.
+2. Integrasi Prompt PoC Generator:
+- Gunakan template prompt dari config/prompts/exploit_prompt.txt untuk menambahkan tombol "Generate PoC" di Web UI Anda.
+3. Adopsi masvs_mapping.json:
+- Tambahkan badge OWASP MASVS (misal: MASVS-STORAGE-1, MASVS-PLATFORM-2) pada tabel temuan di Web UI Anda untuk laporan bertaraf korporat.
+
+
+
+
+Berdasarkan analisis terhadap arsitektur web UI saat ini (Dashboard, Upload, Results, Modal Popup, dan CSS), berikut adalah saran dan rekomendasi peningkatan UI/UX yang dapat membuat tampilan tools Mobile Audit Anda jauh lebih modern, interaktif, dan berstandar tools keamanan profesional (seperti MobSF, Snyk, atau Burp Suite Enterprise):
+🎨 1. Peningkatan Halaman Hasil (results.html)
+A. Badge Counter Dinamis pada Tab Menu
+Saat ini tombol tab di atas berupa teks statis (Manifest & Komponen, Hardcoded Secrets, dll).
+- Saran: Tambahkan pill counter angka otomatis pada setiap tab seperti:
+- Hardcoded Secrets (6) $\rightarrow$ badge merah/oranye jika ada Critical/High
+- Temuan / Findings (1,199)
+- Attack Surface (9)
+- Tujuan: Pengguna langsung tahu tab mana yang memiliki temuan kritis tanpa harus membuka tabnya satu per satu.
+B. Sticky Quick-Stats Header Bar
+Ketika pengguna scroll ke bawah pada report yang panjang:
+- Saran: Buat header ringkas tetap melayang (sticky header) di bagian atas yang menampilkan:
+- Nama APK / Package
+- Severity pill counter: 🔴 2 Crit | 🟠 4 High | 🟡 12 Med | 🟢 5 Low
+- Tombol aksi cepat: Download .MD Export JSON Re-scan
+C. Filter & Sort Bar di Setiap Tab
+- Saran: Tambahkan filter bar lokal di Tab Secrets, Findings, dan Attack Surface:
+- Filter Severity dropdown: Tampilkan hanya Critical & High saja.
+- Search input: Filter cepat nama file atau keyword rule secara instan (client-side JS).
+- Quick Tag Filter: Filter per kategori (Firebase, AWS, Insecure Storage, dll).
+🔍 2. Penyempurnaan Modal Source Context (Popup Kode)
+A. Action Buttons di Footer Modal
+Saat modal dibuka dan menampilkan $\pm 5$ baris kode:
+- Saran: Tambahkan tombol aksi praktis di footer modal:
+- 📋 "Copy Snippet" $\rightarrow$ Menyalin 11 baris kode langsung ke clipboard.
+- 📄 "Copy File Path" $\rightarrow$ Menyalin path lengkap file untuk dibuka di IDE/VS Code.
+- 🌐 "Open in Full View" $\rightarrow$ Opsi expand untuk melihat 20–50 baris kode jika 5 baris masih kurang cukup memahami alur logika.
+B. Syntax Highlighting Otomatis (Java, XML, Smali, JS)
+- Saran: Integrasikan library ringan seperti Prism.js atau Highlight.js (tanpa dependensi berat) pada <div id="ctx-code-inner">.
+- Tujuan: Kode XML/Java di dalam modal memiliki warna syntax (tag, keyword, string, comment) yang rapi, dengan secret match tetap di-highlight Highcolor emas mencolok.
+🌐 3. Peningkatan Visualisasi pada Attack Surface & Deep Links
+A. Categorized Endpoint Badges & Methods
+Pada tab Attack Surface:
+- Berikan warna berbeda untuk endpoint yang mencurigakan:
+- 🔴 Hardcoded IP Address (misal: 192.168.1.1 atau public IP mentah)
+- 🟠 Non-HTTPS / HTTP Plaintext (rentan MitM)
+- 🟢 Production API Domain
+- 🟡 Dev / Staging / Test Domain
+- Tambahkan tombol "Copy URL" dan tombol "Open in Browser" (dengan warning).
+B. One-Click DeepLink ADB Command Builder
+Pada tab Manifest & Deep Links:
+- Di sebelah URL Scheme (misal: greatday://attendance/checkin), buat tombol "Copy ADB PoC" yang otomatis menghasilkan:
+adb shell am start -a android.intent.action.VIEW -d "greatday://attendance/checkin"
+📊 4. Peningkatan Dashboard Utama (index.html & history.html)
+A. Visual Severity Breakdown Chart (Mini Chart)
+Pada daftar riwayat scan di Dashboard:
+- Tampilkan stacked mini progress-bar untuk komposisi severity temuan tiap APK:
+- Garis warna: Merah (Critical) | Oranye (High) | Kuning (Med) | Abu-abu (Info)
+- Pengguna bisa langsung melihat sekilas APK mana yang paling berbahaya (high risk).
+B. Triage / Status Tagging (False Positive / Verified)
+- Tambahkan tombol status interaktif pada setiap temuan:
+- [Mark as False Positive]
+- [Mark as Verified Bug]
+- [Needs Further Test]
+- Status tersimpan ke SQLite sehingga hunter tidak mengulang-ulang memeriksa temuan yang sudah pernah ditolak.
+💡 Ringkasan Rekomendasi Prioritas UI
+Prioritas	Fitur UI	Manfaat Utama
+Tinggi (Quick Win)	Pill Counter pada Tab Menu (angka jumlah temuan per tab)	Mempercepat navigasi dan prioritas triage
+Tinggi (Quick Win)	Tombol Copy Snippet & Full Path di Modal Popup	Sangat membantu hunter saat membuat draft report
+Sedang	Filter Severity & Search di Tab Secrets/Findings	Membantu menyaring ratusan temuan dalam sekejap
+Sedang	One-Click ADB Command Copy pada DeepLink & Activity	Langsung siap dieksekusi di emulator/device
+Masa Depan	Prism.js Syntax Highlighting di Modal Code	Tampilan kode jauh lebih profesional dan mudah dibaca
+
+
+
+
+
+OPSI PENGEMBANGAN JARAK DEKAT:
+Pendekatan kamu sangat tepat dan terstruktur (Best Practice). 
+Membangun Opsi A sampai D terlebih dahulu (Deterministic / Rule-based Engine) adalah langkah paling ideal karena:
+1. 100% Bebas Token & Gratis (tidak bergantung kuota/koneksi API).
+2. Deterministic (Pasti Akurat & Zero Hallucination): Parameter intent yang diambil langsung dari kode sumber (getStringExtra, FLAG_MUTABLE, dll) tidak akan mengarang nama parameter.
+3. Hasil Instan (< 1 detik) dibandingkan menunggu respons LLM.
+💡 Rencana & Desain Pengembangan: Opsi A - D + Tombol Frida Script
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       AUTOMATED POC ENGINE PIPELINE                         │
+├───────────────────┬───────────────────┬───────────────────┬─────────────────┤
+│ 1. Parameter      │ 2. Frida Auto-Gen │ 3. HTML Launcher  │ 4. Python Auto- │
+│    Extractor      │    (Bypass Suite) │    (WebView/XSS)  │    Verifier     │
+│    (Java/Smali)   │    (One-Click)    │    (DeepLink)     │    (Logcat POC) │
+└───────────────────┴───────────────────┴───────────────────┴─────────────────┘
+1. 🔍 Desain Opsi A: Intent Parameter Extractor (poc_engine.py)
+Saat backend menganalisis file Java/Smali dari komponen yang exported="true":
+- Regex / AST Scanner mengekstrak:
+- String Extras: getIntent().getStringExtra("token") $\rightarrow$ --es "token" "EXPLOIT_PAYLOAD"
+- Int Extras: getIntExtra("id", 0) $\rightarrow$ --ei "id" 1337
+- Boolean Extras: getBooleanExtra("is_admin", false) $\rightarrow$ --ez "is_admin" true
+- URI Data Query: getIntent().getData().getQueryParameter("redirect_url") $\rightarrow$ -d "myapp://auth?redirect_url=https://evil.com"
+- Hasil di Web UI: Tombol ADB PoC otomatis terisi parameter asli aplikasi target, bukan sekadar dummy.
+2. 💉 Desain Opsi B: Tombol "Generate Frida Bypass Script" (One-Click)
+Setelah scan selesai, di samping tab Overview / Live Verifier, terdapat card/tombol:
+[ 💉 Generate Frida Bypass Script (.js) ]
+Backend akan mengagregasikan hasil deteksi (dari APKiD, Manifest, dan Code Scanning) dan meracik script Frida .js komprehensif yang memuat:
+1. Universal SSL Pinning Bypass: OkHttp3 (CertificatePinner), TrustManagerImpl, NetworkSecurityConfig, Webview Client.
+2. Root / Jailbreak Detection Bypass: Hook File.exists (/system/bin/su), Build.TAGS (test-keys), RootBeer library bypass.
+3. Biometric Bypass: Hook BiometricPrompt.AuthenticationCallback.onAuthenticationSucceeded().
+4. Targeted Crypto Dumper: Hook otomatis fungsi AES/DES (Cipher.doFinal, SecretKeySpec) jika scanner menemukan rule Crypto di aplikasi tersebut.
+5. UI Interaktif: Pengguna bisa langsung melihat script di browser, menyalinnya (Copy Frida Script), atau mengunduhnya sebagai bypass_hooks.js.
+3. 🌐 Desain Opsi C: HTML Exploit Builder
+- Otomatis membuat template file HTML yang bisa di-host di server penyerang.
+- Berisi auto-redirect iframe / window.location untuk mentrigger Intent Scheme URLs atau DeepLink yang membuka WebView tanpa validasi origin.
+4. 🐍 Desain Opsi D: Python Runner + Logcat Assertion
+- Men-generate script Python mandiri yang mengeksekusi ADB sekaligus membaca adb logcat -d untuk memverifikasi apakah terjadi crash, token leak, atau permission denial.
+🤖 5. Rekomendasi AI-Assistant Gratis untuk Opsi E (Masa Depan)
+Jika nanti kamu ingin menambahkan Fase E (AI-Powered Custom PoC & Exploit Explanation), berikut beberapa opsi gratis terbaik yang bisa kamu pakai:
+Provider AI	Tier Gratis	Keterangan & Keunggulan
+1. Google Gemini API (Recommended)	🟢 Gratis 15 RPM / 1.500 RPD	Menggunakan gemini-1.5-flash atau gemini-2.0-flash. Sangat cepat, context window 1M tokens, dan API key gratis dari Google AI Studio.
+2. Groq Cloud	🟢 Gratis ~30 RPM	Menggunakan model open-source llama-3.3-70b-versatile atau mixtral-8x7b. Kecepatan inferensi tercepat di dunia (300+ token/detik).
+3. Ollama (100% Lokal & Offline)	🟢 Unlimited & Gratis	Berjalan langsung di laptop/PC kamu menggunakan model seperti qwen2.5-coder:7b atau deepseek-r1:7b. Tidak butuh koneksi internet dan aman dari kebocoran data klien.
+4. OpenRouter Free Tier	🟢 Gratis (Model tertentu)	Menyediakan akses ke model-model gratis bertanda :free (misal meta-llama/llama-3.3-70b-instruct:free).
+📋 Rencana Implementasi
+Apakah rencana bertahap ini sudah cocok:
+1. Fase 1: Buat engine backend poc_engine.py (ekstraksi parameter Intent & DeepLink dari Java/Smali).
+2. Fase 2: Buat generator template Frida Bypass Script serbaguna (Root, SSL Pinning, Biometric, Crypto Hook) + tombol download/copy di UI.
+3. Fase 3: Buat generator HTML Webview PoC dan Python Logcat PoC.
+4. Fase 4: Siapkan arsitektur konektor modular untuk LLM gratis (Gemini / Groq / Ollama) untuk Fase E nanti.

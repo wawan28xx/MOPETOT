@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}History - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div class="history-page">
+    <h1>Scan History</h1>
+
+    <div class="stats-grid stats-small">
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.total_scans or 0 }}</div>
+            <div class="stat-label">Total</div>
+        </div>
+        <div class="stat-card stat-success">
+            <div class="stat-number">{{ stats.completed or 0 }}</div>
+            <div class="stat-label">Done</div>
+        </div>
+        <div class="stat-card stat-warning">
+            <div class="stat-number">{{ stats.running or 0 }}</div>
+            <div class="stat-label">Active</div>
+        </div>
+    </div>
+
+    {% if scans %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>File</th>
+                <th>Platform</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Package</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for scan in scans %}
+            <tr>
+                <td><code>#{{ scan.id }}</code></td>
+                <td>{{ scan.filename }}</td>
+                <td><span class="badge badge-{{ scan.platform }}">{{ scan.platform }}</span></td>
+                <td>{{ scan.file_type }}</td>
+                <td>
+                    <span class="status status-{{ scan.status }}">
+                        {% if scan.status == 'completed' %}&#10003;
+                        {% elif scan.status == 'running' %}&#9654;
+                        {% elif scan.status == 'failed' %}&#10007;
+                        {% else %}&#9202;{% endif %}
+                    </span>
+                </td>
+                <td><code>{{ scan.package_name or '-' }}</code></td>
+                <td>{{ scan.created_at[:10] if scan.created_at else '-' }}</td>
+                <td>
+                    {% if scan.status == 'completed' %}
+                    <a href="/results/{{ scan.id }}" class="btn btn-sm">Results</a>
+                    {% endif %}
+                    <button class="btn btn-sm btn-danger" onclick="deleteScan({{ scan.id }})">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No scans in history.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+async function deleteScan(id) {
+    if (!confirm('Delete this scan?')) return;
+    await fetch('/api/scan/' + id, { method: 'DELETE' });
+    location.reload();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Compare - Mobile Audit Tool{% endblock %}
+{% block content %}
+<div class="compare-page">
+    <h1>Compare Scans</h1>
+    <p class="subtitle">Compare attack surface between two scans (Android vs iOS, or different versions)</p>
+
+    <div class="compare-selectors">
+        <div class="compare-select">
+            <label>Scan #1</label>
+            <select id="scan1" class="select">
+                <option value="">Select scan...</option>
+                {% for scan in scans %}
+                {% if scan.status == 'completed' %}
+                <option value="{{ scan.id }}">{{ scan.filename }} ({{ scan.platform }}) - #{{ scan.id }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+        <div class="compare-vs">VS</div>
+        <div class="compare-select">
+            <label>Scan #2</label>
+            <select id="scan2" class="select">
+                <option value="">Select scan...</option>
+                {% for scan in scans %}
+                {% if scan.status == 'completed' %}
+                <option value="{{ scan.id }}">{{ scan.filename }} ({{ scan.platform }}) - #{{ scan.id }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn btn-primary" onclick="runCompare()">Compare</button>
+    </div>
+
+    <div id="compare-results" class="compare-results" style="display:none;">
+        <div class="compare-grid">
+            <div class="compare-col">
+                <h3 id="compare-title-1">Scan #1</h3>
+                <div id="compare-stats-1"></div>
+                <div id="compare-findings-1"></div>
+            </div>
+            <div class="compare-col">
+                <h3 id="compare-title-2">Scan #2</h3>
+                <div id="compare-stats-2"></div>
+                <div id="compare-findings-2"></div>
+            </div>
+        </div>
+
+        <div class="compare-diff" id="compare-diff"></div>
+    </div>
+</div>
+
+<script>
+async function runCompare() {
+    const id1 = document.getElementById('scan1').value;
+    const id2 = document.getElementById('scan2').value;
+    if (!id1 || !id2) { alert('Select both scans'); return; }
+
+    const resp = await fetch('/api/compare/' + id1 + '/' + id2);
+    const data = await resp.json();
+
+    document.getElementById('compare-results').style.display = 'block';
+    document.getElementById('compare-title-1').textContent = data.scan1.filename;
+    document.getElementById('compare-title-2').textContent = data.scan2.filename;
+
+    document.getElementById('compare-stats-1').innerHTML = renderCompareStats(data.findings1, data.secrets1, data.endpoints1);
+    document.getElementById('compare-stats-2').innerHTML = renderCompareStats(data.findings2, data.secrets2, data.endpoints2);
+
+    document.getElementById('compare-findings-1').innerHTML = renderFindingsList(data.findings1);
+    document.getElementById('compare-findings-2').innerHTML = renderFindingsList(data.findings2);
+
+    const diff = computeDiff(data);
+    document.getElementById('compare-diff').innerHTML = diff;
+}
+
+function renderCompareStats(findings, secrets, endpoints) {
+    const sevCounts = {};
+    findings.forEach(f => { sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1; });
+
+    let html = '<div class="compare-stats">';
+    html += '<div class="stat-row"><span>Total Findings:</span><strong>' + findings.length + '</strong></div>';
+    html += '<div class="stat-row"><span>Secrets:</span><strong>' + secrets.length + '</strong></div>';
+    html += '<div class="stat-row"><span>Endpoints:</span><strong>' + endpoints.length + '</strong></div>';
+    for (const [sev, count] of Object.entries(sevCounts)) {
+        html += '<div class="stat-row"><span class="severity-dot severity-' + sev + '">' + sev + ':</span><strong>' + count + '</strong></div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+function renderFindingsList(findings) {
+    if (!findings.length) return '<p class="empty">No findings</p>';
+    let html = '<ul class="findings-list">';
+    findings.forEach(f => {
+        html += '<li><span class="severity-dot severity-' + f.severity + '">' + f.severity + '</span> ' + f.title + '</li>';
+    });
+    html += '</ul>';
+    return html;
+}
+
+function computeDiff(data) {
+    const titles1 = new Set(data.findings1.map(f => f.title));
+    const titles2 = new Set(data.findings2.map(f => f.title));
+
+    const only1 = data.findings1.filter(f => !titles2.has(f.title));
+    const only2 = data.findings2.filter(f => !titles1.has(f.title));
+
+    if (!only1.length && !only2.length) return '';
+
+    let html = '<h3>Differences</h3>';
+    if (only1.length) {
+        html += '<div class="diff-section"><h4>Only in Scan #1</h4><ul>';
+        only1.forEach(f => { html += '<li>' + f.title + '</li>'; });
+        html += '</ul></div>';
+    }
+    if (only2.length) {
+        html += '<div class="diff-section"><h4>Only in Scan #2</h4><ul>';
+        only2.forEach(f => { html += '<li>' + f.title + '</li>'; });
+        html += '</ul></div>';
+    }
+    return html;
+}
+</script>
+{% endblock %}

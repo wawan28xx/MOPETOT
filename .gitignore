@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local logs
+*.log
+web/server.log
+
+# Runtime scan artifacts (sensitive / large)
+web/uploads/
+web/results/
+reports/
+
+# Local SQLite runtime DB
+web/database/mobile_audit.db
+
+# External tools / binaries (install separately)
+bin/
+
+# Optional local temp/test files
+*.tmp
+*.bak
