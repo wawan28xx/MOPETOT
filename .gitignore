@@ -27,9 +27,6 @@ reports/
 # Local SQLite runtime DB
 web/database/mobile_audit.db
 
-# External tools / binaries (install separately)
-bin/
-
 # Optional local temp/test files
 *.tmp
 *.bak
