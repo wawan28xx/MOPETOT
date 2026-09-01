@@ -26,6 +26,12 @@ reports/
 
 # Local SQLite runtime DB
 web/database/mobile_audit.db
+web/database/*.db-wal
+web/database/*.db-shm
+
+# Local env files
+.env
+web/.env
 
 # Optional local temp/test files
 *.tmp
