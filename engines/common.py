@@ -40,6 +40,57 @@ _TOOL_CANDIDATES = {
 }
 
 
+def _looks_executable(path: Path) -> bool:
+    return path.exists() and path.is_file()
+
+
+def find_java():
+    cache_key = "__java__"
+    if cache_key in _TOOL_CACHE:
+        return _TOOL_CACHE[cache_key]
+
+    candidates = []
+    env_java = os.environ.get("MOBILE_AUDIT_JAVA", "").strip()
+    if env_java:
+        candidates.append(Path(env_java))
+
+    bundled = BIN / "jre" / "bin" / ("java.exe" if os.name == "nt" else "java")
+    candidates.append(bundled)
+
+    java_home = os.environ.get("JAVA_HOME", "").strip()
+    if java_home:
+        candidates.append(Path(java_home) / "bin" / ("java.exe" if os.name == "nt" else "java"))
+
+    sys_java = shutil.which("java")
+    if sys_java:
+        candidates.append(Path(sys_java))
+
+    found = None
+    for p in candidates:
+        if _looks_executable(p):
+            found = p
+            break
+
+    _TOOL_CACHE[cache_key] = found
+    return found
+
+
+def java_runtime_env():
+    java = find_java()
+    if not java:
+        return {}
+
+    env = {}
+    java_bin = java.parent
+    path_val = os.environ.get("PATH", "")
+    parts = path_val.split(os.pathsep) if path_val else []
+    if str(java_bin) not in parts:
+        env["PATH"] = str(java_bin) + (os.pathsep + path_val if path_val else "")
+    if java_bin.name.lower() == "bin":
+        env.setdefault("JAVA_HOME", str(java_bin.parent))
+    return env
+
+
 def find_tool(name):
     if name in _TOOL_CACHE:
         return _TOOL_CACHE[name]
@@ -50,6 +101,7 @@ def find_tool(name):
 
 def run(cmd, cwd=None, timeout=300, env_extra=None, stream=False):
     env = dict(os.environ)
+    env.update(java_runtime_env())
     if env_extra:
         env.update(env_extra)
     creationflags = 0

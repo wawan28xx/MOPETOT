@@ -2,7 +2,7 @@
 import zipfile
 from pathlib import Path
 
-from .common import run as run_cmd, find_tool, log, extract_strings_basic
+from .common import run as run_cmd, find_tool, find_java, log, extract_strings_basic
 from . import dex_engine, native_engine, flutter_engine, unity_engine, generic_engine, plist_engine
 
 
@@ -108,10 +108,13 @@ def apktool_decode(apk_file: Path, outdir: Path, opts: dict):
     if not apktool:
         log("apktool tidak ditemukan, manifest dilewati", "warn")
         return
-    java = "java"
+    java = find_java()
+    if not java:
+        log("Java runtime tidak ditemukan. Pastikan bin/jre tersedia atau set MOBILE_AUDIT_JAVA/JAVA_HOME.", "warn")
+        return
     outdir.mkdir(parents=True, exist_ok=True)
     log("[>] apktool decode: manifest + resources (live progress di bawah)")
-    rc, out, err = run_cmd([java, "-jar", str(apktool), "d", "-f", "-o", str(outdir), str(apk_file)],
+    rc, out, err = run_cmd([str(java), "-jar", str(apktool), "d", "-f", "-o", str(outdir), str(apk_file)],
                        timeout=900, stream=True)
     if rc != 0:
         log(f"apktool decode gagal: {err[:200]}", "warn")

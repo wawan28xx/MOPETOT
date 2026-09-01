@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 from .common import run as run_cmd
-from .common import find_tool, log
+from .common import find_tool, find_java, log
 
 
 def _has_output(outdir: Path) -> bool:
@@ -37,9 +37,13 @@ def run(dex_files, outdir: Path, opts: dict):
     # Fallback smali via apktool
     apktool = find_tool("apktool")
     if apktool and dex_files:
+        java = find_java()
+        if not java:
+            log("Java runtime tidak ditemukan. Smali fallback dilewati (set bin/jre atau MOBILE_AUDIT_JAVA).", "warn")
+            return
         smali_out = outdir.parent / "smali"
         smali_out.mkdir(parents=True, exist_ok=True)
-        rc, out, err = run_cmd(["java", "-jar", str(apktool), "d", "-f", "-s", "-o", str(smali_out), str(dex_files[0].parent)],
+        rc, out, err = run_cmd([str(java), "-jar", str(apktool), "d", "-f", "-s", "-o", str(smali_out), str(dex_files[0].parent)],
                            timeout=600, stream=True)
         if rc == 0:
             log("apktool: smali assembly dihasilkan", "ok")

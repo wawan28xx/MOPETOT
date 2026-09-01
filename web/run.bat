@@ -8,7 +8,7 @@ echo.
 cd /d "%~dp0"
 
 echo [1/2] Checking dependencies...
-python -c "import fastapi, uvicorn, aiosqlite, jinja2, python_multipart" 2>nul
+python -c "import fastapi, uvicorn, aiosqlite, jinja2, multipart" 2>nul
 if errorlevel 1 (
     echo [!] Installing dependencies...
     pip install -r requirements.txt

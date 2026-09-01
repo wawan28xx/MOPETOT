@@ -167,7 +167,7 @@ APKID_WRAPPER = BASE / "apkid_wrapper.py"
 
 # Python 3.13 + yara-python-dex (APKiD butuh dex module; tidak ada di 3.14).
 PY313_CANDIDATES = [
-    r"C:\Users\Administrator_DEIT\AppData\Local\Programs\Python\Python313\python.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\python.exe"),
     r"C:\Program Files\Python313\python.exe",
     r"C:\Python313\python.exe",
 ]
@@ -175,6 +175,10 @@ PY313_CANDIDATES = [
 
 def _py313():
     import shutil
+    env_py313 = os.environ.get("MOBILE_AUDIT_PY313", "").strip()
+    if env_py313 and Path(env_py313).exists():
+        return env_py313
+
     launcher = shutil.which("py")
     if launcher:
         try:
@@ -188,6 +192,10 @@ def _py313():
     for p in PY313_CANDIDATES:
         if Path(p).exists():
             return p
+
+    current_python = Path(sys.executable)
+    if current_python.exists() and sys.version_info[:2] == (3, 13):
+        return str(current_python)
     return None
 
 

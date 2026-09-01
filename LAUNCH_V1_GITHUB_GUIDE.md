@@ -4,7 +4,7 @@ Panduan ini untuk menyiapkan repo publik/private GitHub dengan aman sebelum laun
 
 ## 1. Tujuan
 
-- Memastikan hanya source code dan dokumentasi yang naik ke GitHub.
+- Memastikan source code, dokumentasi, dan runtime toolchain minimum naik ke GitHub.
 - Mencegah kebocoran sample APK/IPA, hasil scan, atau kredensial.
 - Menyiapkan struktur release yang rapi untuk v1.
 
@@ -21,6 +21,15 @@ Panduan ini untuk menyiapkan repo publik/private GitHub dengan aman sebelum laun
 - `apkid_wrapper.py`
 - `.gitignore`
 - `rules/secrets.json`
+
+### Runtime Toolchain (Windows bundle)
+
+- `bin/apktool.jar`
+- `bin/jadx/`
+- `bin/radare2/`
+- `bin/dotnet-tools/`
+- `bin/il2cppdumper/`
+- `bin/jre/` (portable Java runtime untuk zero-install)
 
 ### Engines
 
@@ -53,18 +62,14 @@ Panduan ini untuk menyiapkan repo publik/private GitHub dengan aman sebelum laun
 - `__pycache__/`
 - `*.pyc`
 
-### Bundled Heavy Binary Toolchains (untuk source release v1)
+### Optional or Local-only Toolchains (boleh tidak di-upload)
 
-- `bin/ghidra_12.1.2_PUBLIC/`
-- `bin/dotnet-sdk/`
-- `bin/radare2/`
-- `bin/jadx/`
-- `bin/vcpkg/`
-- `bin/icu/`
-- `bin/blutter_out/`
+- `bin/blutter_src/`
 - `bin/blutter_src/build/`
+- `bin/blutter_out/`
+- `bin/vcpkg/`
 
-Catatan: `bin/apktool.jar` boleh dipisah jadi langkah install manual agar repo ringan.
+Catatan: `bin/ghidra_12.1.2_PUBLIC/` dan `bin/dotnet-sdk/` opsional untuk fitur lanjutan tertentu.
 
 ## 4. Checklist Pre-Push
 
@@ -116,7 +121,12 @@ Untuk rilis berikutnya:
 
 ## 7. Operational Notes
 
-- Setelah clone fresh, jalankan `python web/init_db.py` sebelum `python web/app.py`.
+- Setelah clone fresh:
+  - jalankan `pip install -r web/requirements.txt`
+  - jalankan `python web/app.py` (auto-init DB)
+  - optional: `python web/init_db.py` jika ingin init manual
+- Validasi Java bundled:
+  - jalankan `bin\\jre\\bin\\java.exe -version`
 - Untuk environment production internal, pertimbangkan:
   - reverse proxy
   - auth layer
