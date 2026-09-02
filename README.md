@@ -29,6 +29,11 @@ Variabel lingkungan opsional:
 
 - `MOBILE_AUDIT_JAVA`: path executable Java yang ingin digunakan.
 - `MOBILE_AUDIT_PY313`: path Python 3.13 untuk enrichment APKiD.
+- `MOPETOT_UPLOAD_DIR`: direktori upload; default `web/uploads`.
+- `MOPETOT_RESULTS_DIR`: direktori hasil; default `web/results`.
+- `MOPETOT_DB_PATH`: path database SQLite; default `web/database/mobile_audit.db`.
+- `MOPETOT_MAX_UPLOAD_BYTES`: batas upload; image production memakai 500 MiB.
+- `MOPETOT_MAX_CONCURRENT_SCANS`: jumlah scan aktif; production memakai `1`.
 
 ## Instalasi lokal
 
@@ -120,20 +125,32 @@ Image memakai Python 3.13, Java, `binutils`, dan `file`, berjalan sebagai user n
 ```bash
 docker build -t mopenot:local .
 docker run --rm -p 8089:8089 \
-  -v mopenot-uploads:/app/web/uploads \
-  -v mopenot-results:/app/web/results \
-  -v mopenot-db:/app/web/database \
+  -v mopenot-data:/data \
   mopenot:local
 ```
 
-Tool Windows-only yang ada di checkout lokal sengaja tidak disertakan dalam image Linux. Untuk deployment, gunakan volume persisten pada `web/uploads`, `web/results`, dan `web/database`.
+Tool Windows-only yang ada di checkout lokal sengaja tidak disertakan dalam image Linux. Image menyimpan upload, hasil, dan SQLite di `/data`; gunakan satu volume persisten untuk direktori tersebut. Endpoint health tersedia di `/healthz`.
 
 ## CI/CD
 
-- `.github/workflows/ci-cd.yml` menjalankan compile check, smoke test FastAPI, build/health check Docker, lalu publish ke `ghcr.io/<owner>/<repository>` pada push ke `main`/`master` atau tag `v*`. Pull request menjalankan tahap validasi tanpa publish.
-- `Jenkinsfile` menjalankan tahap yang sama. Publish dikendalikan parameter `PUBLISH_IMAGE`; konfigurasi default memakai credential Jenkins `docker-registry-credentials`, registry Docker Hub, dan image `mopenot/mopenot`.
+Jenkins adalah satu-satunya CI/CD production. Push ke branch `master` menjalankan compile/test, build dan health check image, import immutable image ke containerd k3s, rollout Deployment dan CronJob, lalu memverifikasi `https://mopetot.pentest.web.id/healthz`. Rollout dikembalikan ke image sebelumnya bila validasi deployment gagal.
 
-Workflow GitHub menggunakan `GITHUB_TOKEN`, sehingga repository harus mengizinkan Actions menulis package pada GHCR. Jenkins agent harus memiliki Python 3.13+, Docker CLI/daemon, dan credential username/password untuk registry.
+Jenkins job memakai repository public `wawan28xx/MOPETOT`, trigger webhook GitHub, dan polling lima-menit sebagai fallback. Agent `k3s-platform-prod-kubeconfig` harus memiliki Docker, izin import image melalui `sudo -n k3s ctr`, serta kubeconfig terbatas `/home/deit/.kube/mopetot-config`.
+
+Manifest production dan script provisioning berada di `/home/deit/defendit-k8s`:
+
+- `platform-prod/mopetot-prod.yaml`
+- `cicd/jenkins-mopetot-rbac.yaml`
+- `cicd/jenkins-mopetot-job.yaml`
+- `scripts/setup-mopetot-jenkins.sh`
+- `scripts/activate-mopetot-tunnel.sh`
+
+Production memakai satu replica karena SQLite, antrean in-process, dan PVC `ReadWriteOnce`. PVC Longhorn berukuran 50 GiB. CronJob menghapus scan completed/failed yang lebih lama dari 30 hari; jalankan dry-run sebelum aktivasi:
+
+```bash
+docker run --rm -v mopenot-data:/data --workdir /app/web mopenot:local \
+  python -m maintenance.retention --days 30 --dry-run
+```
 
 ## Struktur repository
 
@@ -163,7 +180,7 @@ Perintah yang digunakan CI untuk pemeriksaan sintaks:
 python -m compileall -q mobile_audit.py apkid_wrapper.py secret_scanner.py engines web
 ```
 
-Smoke test web dapat dilakukan dengan menjalankan server lalu membuka `/api/scans?per_page=5` atau `/docs`.
+Smoke test web dapat dilakukan dengan menjalankan server lalu membuka `/healthz` atau `/docs`.
 
 ## Keamanan dan privasi
 
@@ -171,3 +188,4 @@ Smoke test web dapat dilakukan dengan menjalankan server lalu membuka `/api/scan
 - Perlakukan upload, corpus, laporan, secret, dan hasil verifier sebagai data sensitif.
 - Jangan commit `web/uploads/`, `web/results/`, database SQLite, atau laporan klien ke repository publik.
 - Verifier melakukan request jaringan ke target yang diberikan; gunakan hanya pada target yang berwenang.
+- Deployment publik tidak memiliki autentikasi. Siapa pun dapat mengunggah file, menjalankan verifier, membaca atau menghapus hasil; batas upload, antrean tunggal, dan retention bukan pengganti kontrol akses.

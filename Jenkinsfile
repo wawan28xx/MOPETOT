@@ -1,99 +1,60 @@
 pipeline {
-    agent any
+    agent { label 'k3s-platform-prod-kubeconfig' }
 
     options {
         skipDefaultCheckout(true)
-        disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds()
         timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
         timeout(time: 45, unit: 'MINUTES')
     }
 
-    parameters {
-        booleanParam(
-            name: 'PUBLISH_IMAGE',
-            defaultValue: false,
-            description: 'Publish the image on main/master or tag builds.'
-        )
-        string(
-            name: 'PYTHON_BIN',
-            defaultValue: 'python3.13',
-            description: 'Python 3.12+ executable available on the Jenkins agent.'
-        )
-        string(
-            name: 'DOCKER_REGISTRY',
-            defaultValue: 'https://index.docker.io/v1/',
-            description: 'Registry URL used by docker login.'
-        )
-        string(
-            name: 'DOCKER_IMAGE',
-            defaultValue: 'mopenot/mopenot',
-            description: 'Target image repository, without a tag.'
-        )
-        string(
-            name: 'DOCKER_CREDENTIALS_ID',
-            defaultValue: 'docker-registry-credentials',
-            description: 'Jenkins username/password credential ID.'
-        )
+    triggers {
+        githubPush()
+        pollSCM('H/5 * * * *')
     }
 
     environment {
-        VENV_DIR = '.ci-venv'
-        LOCAL_IMAGE = "mopenot:${BUILD_NUMBER}"
-        CONTAINER_NAME = "mopenot-ci-${BUILD_NUMBER}"
+        APP_NAME = 'mopetot'
+        NAMESPACE = 'platform-prod'
+        KUBECONFIG = '/home/deit/.kube/mopetot-config'
+        CONTAINER_NAME = "mopetot-ci-${BUILD_NUMBER}"
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout master') {
             steps {
                 checkout scm
-            }
-        }
-
-        stage('Python checks') {
-            steps {
-                sh '''
-                    set -eu
-                    "$PYTHON_BIN" -m venv "$VENV_DIR"
-                    "$VENV_DIR/bin/python" -m pip install --upgrade pip
-                    "$VENV_DIR/bin/python" -m pip install -r web/requirements.txt
-                    "$VENV_DIR/bin/python" -m compileall -q \
-                        mobile_audit.py apkid_wrapper.py secret_scanner.py engines web
-                '''
-            }
-        }
-
-        stage('Application smoke test') {
-            steps {
-                sh '''
-                    set -eu
-                    "$VENV_DIR/bin/python" -m uvicorn app:app \
-                        --app-dir web --host 127.0.0.1 --port 8089 &
-                    server_pid=$!
-                    trap 'kill "$server_pid" 2>/dev/null || true' EXIT INT TERM
-
-                    attempt=0
-                    while [ "$attempt" -lt 30 ]; do
-                        if "$VENV_DIR/bin/python" -c \
-                            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8089/api/scans?per_page=5', timeout=2)"; then
-                            exit 0
-                        fi
-                        if ! kill -0 "$server_pid" 2>/dev/null; then
-                            wait "$server_pid"
-                            exit 1
-                        fi
-                        attempt=$((attempt + 1))
-                        sleep 1
-                    done
-
-                    echo "Application did not become ready in time" >&2
-                    exit 1
-                '''
+                script {
+                    def revision = sh(
+                        script: 'git rev-parse --short=12 HEAD',
+                        returnStdout: true
+                    ).trim()
+                    env.IMAGE_TAG = "${revision}-jenkins${env.BUILD_NUMBER}"
+                    env.LOCAL_IMAGE = "${env.APP_NAME}:${env.IMAGE_TAG}"
+                }
             }
         }
 
         stage('Build image') {
             steps {
-                sh 'docker build --tag "$LOCAL_IMAGE" .'
+                sh '''
+                    set -eu
+                    docker build --pull --target runtime --tag "$LOCAL_IMAGE" .
+                '''
+            }
+        }
+
+        stage('Application tests') {
+            steps {
+                sh '''
+                    set -eu
+                    docker run --rm --entrypoint python "$LOCAL_IMAGE" \
+                        -m compileall -q mobile_audit.py apkid_wrapper.py \
+                        secret_scanner.py engines web
+                    docker run --rm --entrypoint python "$LOCAL_IMAGE" \
+                        -m unittest discover -s web -p 'test_production.py'
+                '''
             }
         }
 
@@ -124,43 +85,100 @@ pipeline {
             }
         }
 
-        stage('Publish image') {
-            when {
-                expression {
-                    params.PUBLISH_IMAGE &&
-                        (env.BRANCH_NAME in ['main', 'master'] || env.TAG_NAME)
-                }
-            }
+        stage('Import image to k3s') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: params.DOCKER_CREDENTIALS_ID,
-                        usernameVariable: 'REGISTRY_USERNAME',
-                        passwordVariable: 'REGISTRY_PASSWORD'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        registry=${DOCKER_REGISTRY#https://}
-                        registry=${registry#http://}
-                        registry=${registry%/}
-                        printf '%s' "$REGISTRY_PASSWORD" | \
-                            docker login "$registry" --username "$REGISTRY_USERNAME" --password-stdin
+                sh 'docker save "$LOCAL_IMAGE" | sudo -n k3s ctr images import -'
+            }
+        }
 
-                        commit_tag=$(git rev-parse --short=12 HEAD)
-                        docker tag "$LOCAL_IMAGE" "$DOCKER_IMAGE:$commit_tag"
-                        docker push "$DOCKER_IMAGE:$commit_tag"
+        stage('Deploy to k3s') {
+            steps {
+                sh '''
+                    set -eu
+                    previous_image="$(
+                        kubectl -n "$NAMESPACE" get deployment "$APP_NAME" \
+                            -o jsonpath='{.spec.template.spec.containers[0].image}'
+                    )"
+                    previous_retention_image="$(
+                        kubectl -n "$NAMESPACE" get cronjob mopetot-retention \
+                            -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}'
+                    )"
+                    rollback_needed=0
 
-                        if [ -n "${TAG_NAME:-}" ]; then
-                            safe_tag=$(printf '%s' "$TAG_NAME" | tr '/:@ ' '----')
-                            docker tag "$LOCAL_IMAGE" "$DOCKER_IMAGE:$safe_tag"
-                            docker push "$DOCKER_IMAGE:$safe_tag"
-                        else
-                            docker tag "$LOCAL_IMAGE" "$DOCKER_IMAGE:latest"
-                            docker push "$DOCKER_IMAGE:latest"
-                        fi
-                    '''
-                }
+                    wait_rollout() {
+                        attempt=0
+                        while [ "$attempt" -lt 120 ]; do
+                            deployment_json="$(
+                                kubectl -n "$NAMESPACE" get deployment "$APP_NAME" -o json
+                            )"
+                            if printf '%s' "$deployment_json" | jq -e '
+                                (.metadata.generation <= (.status.observedGeneration // 0)) and
+                                (.status.updatedReplicas // 0) == .spec.replicas and
+                                (.status.availableReplicas // 0) == .spec.replicas and
+                                (.status.unavailableReplicas // 0) == 0
+                            ' >/dev/null; then
+                                return 0
+                            fi
+                            if printf '%s' "$deployment_json" | jq -e '
+                                any(
+                                    .status.conditions[]?;
+                                    .type == "Progressing" and
+                                    .reason == "ProgressDeadlineExceeded"
+                                )
+                            ' >/dev/null; then
+                                return 1
+                            fi
+                            attempt=$((attempt + 1))
+                            sleep 5
+                        done
+                        return 1
+                    }
+
+                    rollback() {
+                        rollback_needed=0
+                        echo "Deployment validation failed; restoring ${previous_image}" >&2
+                        kubectl -n "$NAMESPACE" set image cronjob/mopetot-retention \
+                            "retention=$previous_retention_image" || true
+                        kubectl -n "$NAMESPACE" set image deployment/"$APP_NAME" \
+                            "$APP_NAME=$previous_image" || true
+                        wait_rollout || true
+                    }
+
+                    trap 'status=$?; if [ "$rollback_needed" = "1" ]; then rollback; fi; exit "$status"' EXIT
+                    trap 'exit 130' INT
+                    trap 'exit 143' TERM
+
+                    rollback_needed=1
+                    kubectl -n "$NAMESPACE" set image cronjob/mopetot-retention \
+                        "retention=$LOCAL_IMAGE"
+                    kubectl -n "$NAMESPACE" set image deployment/"$APP_NAME" \
+                        "$APP_NAME=$LOCAL_IMAGE"
+
+                    if ! wait_rollout; then
+                        exit 1
+                    fi
+
+                    if ! curl --fail --silent --show-error --max-time 30 \
+                        -H 'Host: mopetot.pentest.web.id' \
+                        http://127.0.0.1/healthz >/dev/null; then
+                        exit 1
+                    fi
+
+                    public_ip="$(
+                        curl --fail --silent --show-error \
+                            -H 'accept: application/dns-json' \
+                            'https://cloudflare-dns.com/dns-query?name=mopetot.pentest.web.id&type=A' |
+                            jq -r '.Answer[]? | select(.type == 1) | .data' |
+                            head -n 1
+                    )"
+                    if [ -z "$public_ip" ] || ! curl \
+                        --fail --silent --show-error --max-time 30 \
+                        --resolve "mopetot.pentest.web.id:443:$public_ip" \
+                        https://mopetot.pentest.web.id/healthz >/dev/null; then
+                        exit 1
+                    fi
+                    rollback_needed=0
+                '''
             }
         }
     }
@@ -168,9 +186,14 @@ pipeline {
     post {
         always {
             sh 'docker rm --force --volumes "$CONTAINER_NAME" >/dev/null 2>&1 || true'
+            sh 'test -z "${LOCAL_IMAGE:-}" || docker image rm "$LOCAL_IMAGE" >/dev/null 2>&1 || true'
+            cleanWs()
         }
-        cleanup {
-            sh 'rm -rf "$VENV_DIR"'
+        success {
+            echo 'MOPETOT production deployment completed successfully'
+        }
+        failure {
+            echo 'MOPETOT build or deployment failed; inspect this build log'
         }
     }
 }

@@ -2,16 +2,25 @@ import aiosqlite
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "mobile_audit.db")
+DEFAULT_DB_PATH = Path(__file__).with_name("mobile_audit.db")
+DB_PATH = str(Path(os.environ.get(
+    "MOPETOT_DB_PATH",
+    os.environ.get("DATABASE_PATH", str(DEFAULT_DB_PATH)),
+)).expanduser())
 
 async def get_db():
+    Path(DB_PATH).expanduser().parent.mkdir(parents=True, exist_ok=True)
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA foreign_keys = ON")
+    await db.execute("PRAGMA busy_timeout = 5000")
     return db
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
+    db = await get_db()
+    try:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS scans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +37,9 @@ async def init_db():
                 error TEXT,
                 started_at TEXT,
                 completed_at TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                fast_mode INTEGER DEFAULT 0,
+                queued_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS findings (
@@ -124,6 +135,9 @@ async def init_db():
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_poc_cache_scan
             ON poc_cache(scan_id);
+
+            CREATE INDEX IF NOT EXISTS idx_scans_status_created
+            ON scans(status, created_at, id);
         """)
         await db.commit()
         try:
@@ -131,6 +145,13 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        try:
+            await db.execute("ALTER TABLE scans ADD COLUMN queued_at TEXT")
+            await db.commit()
+        except Exception:
+            pass
+    finally:
+        await db.close()
 
 async def insert_scan(db, filename, file_path, file_size, file_type, platform, fast_mode=0):
     cursor = await db.execute(
@@ -140,9 +161,85 @@ async def insert_scan(db, filename, file_path, file_size, file_type, platform, f
     await db.commit()
     return cursor.lastrowid
 
+
+async def request_scan(db, scan_id):
+    cursor = await db.execute(
+        """
+        UPDATE scans
+        SET status='queued', phase='queued', error=NULL, queued_at=?
+        WHERE id=? AND status='pending'
+        """,
+        (datetime.now().isoformat(), scan_id),
+    )
+    await db.commit()
+    return cursor.rowcount == 1
+
+
+async def claim_next_queued_scan(db):
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        cursor = await db.execute(
+            "SELECT 1 FROM scans WHERE status='running' LIMIT 1"
+        )
+        if await cursor.fetchone():
+            await db.commit()
+            return None
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM scans
+            WHERE status='queued'
+            ORDER BY COALESCE(queued_at, created_at), id
+            LIMIT 1
+            """
+        )
+        scan = await cursor.fetchone()
+        if not scan:
+            await db.commit()
+            return None
+
+        cursor = await db.execute(
+            """
+            UPDATE scans
+            SET status='running', progress=0, phase='init', error=NULL,
+                started_at=?, completed_at=NULL
+            WHERE id=? AND status='queued'
+            """,
+            (datetime.now().isoformat(), scan["id"]),
+        )
+        if cursor.rowcount != 1:
+            await db.rollback()
+            return None
+
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM scans WHERE id=?", (scan["id"],))
+        return await cursor.fetchone()
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def fail_interrupted_scans(db, reason="Scan interrupted: server restart"):
+    cursor = await db.execute(
+        """
+        UPDATE scans
+        SET status='failed', phase='failed', error=?, completed_at=?
+        WHERE status='running'
+        """,
+        (reason, datetime.now().isoformat()),
+    )
+    await db.commit()
+    return cursor.rowcount
+
 async def update_scan_status(db, scan_id, status, progress=None, phase=None, error=None):
     if progress is not None:
         await db.execute("UPDATE scans SET status=?, progress=?, phase=? WHERE id=?", (status, progress, phase, scan_id))
+    elif status == "failed":
+        await db.execute(
+            "UPDATE scans SET status=?, phase=?, error=?, completed_at=? WHERE id=?",
+            (status, phase or "failed", error, datetime.now().isoformat(), scan_id),
+        )
     else:
         await db.execute("UPDATE scans SET status=?, phase=?, error=? WHERE id=?", (status, phase, error, scan_id))
     await db.commit()
