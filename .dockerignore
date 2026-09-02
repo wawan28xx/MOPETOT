@@ -15,6 +15,7 @@ web/.env
 web/uploads
 web/results
 web/database/mobile_audit.db*
+web/.test-runtime
 reports
 
 # The repository bundles Windows-only binaries. The Linux image uses native

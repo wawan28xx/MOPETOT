@@ -3,6 +3,8 @@ import sys
 import json
 import uuid
 import asyncio
+import contextlib
+import logging
 import re
 import shutil
 import time
@@ -21,7 +23,8 @@ from database.db import (
     insert_log, get_scan, get_scans, query_scans, get_findings, get_endpoints,
     get_secrets, get_manifest, get_logs, get_stats, search_findings,
     delete_scan, upsert_verification_cache, get_verification_cache,
-    upsert_poc_cache, get_poc_cache
+    upsert_poc_cache, get_poc_cache, request_scan, claim_next_queued_scan,
+    fail_interrupted_scans
 )
 
 from verification import (
@@ -31,34 +34,142 @@ from verification import (
 
 from poc_engine import PoCEngine
 
-BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-RESULTS_DIR = BASE_DIR / "results"
-MOBILE_AUDIT_DIR = BASE_DIR.parent
+logger = logging.getLogger(__name__)
 
-UPLOAD_DIR.mkdir(exist_ok=True)
-RESULTS_DIR.mkdir(exist_ok=True)
+BASE_DIR = Path(__file__).parent
+UPLOAD_DIR = Path(
+    os.environ.get("MOPETOT_UPLOAD_DIR", os.environ.get("UPLOAD_DIR", BASE_DIR / "uploads"))
+).expanduser()
+RESULTS_DIR = Path(
+    os.environ.get("MOPETOT_RESULTS_DIR", os.environ.get("RESULTS_DIR", BASE_DIR / "results"))
+).expanduser()
+MOBILE_AUDIT_DIR = BASE_DIR.parent
+DEFAULT_MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def _positive_int_env(*names, default):
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is not None:
+            try:
+                value = int(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+    return default
+
+
+MAX_UPLOAD_BYTES = _positive_int_env(
+    "MOPETOT_MAX_UPLOAD_BYTES", "MAX_UPLOAD_BYTES", default=DEFAULT_MAX_UPLOAD_BYTES
+)
+
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Mobile Audit Tool", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 SCAN_PROGRESS = {}
+QUEUE_TASK = None
+QUEUE_WAKEUP = None
+ACTIVE_PROCESS = None
+SHUTTING_DOWN = False
 
 @app.on_event("startup")
 async def startup():
+    global QUEUE_TASK, QUEUE_WAKEUP, SHUTTING_DOWN
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     await init_db()
-    # Mark stale running scans as failed (server restarted mid-scan).
-    # Pending scans dibiarkan (user belum klik Start).
     db = await get_db()
     try:
-        await db.execute(
-            "UPDATE scans SET status='failed', error='Scan interrupted: server restart' "
-            "WHERE status='running'"
-        )
-        await db.commit()
+        await fail_interrupted_scans(db)
     finally:
         await db.close()
+    SHUTTING_DOWN = False
+    QUEUE_WAKEUP = asyncio.Event()
+    QUEUE_TASK = asyncio.create_task(queue_worker(), name="scan-queue-worker")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global QUEUE_TASK, QUEUE_WAKEUP, SHUTTING_DOWN
+    SHUTTING_DOWN = True
+    if QUEUE_WAKEUP:
+        QUEUE_WAKEUP.set()
+    if ACTIVE_PROCESS and ACTIVE_PROCESS.returncode is None:
+        await terminate_process(ACTIVE_PROCESS)
+    if QUEUE_TASK:
+        QUEUE_TASK.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await QUEUE_TASK
+    QUEUE_TASK = None
+    QUEUE_WAKEUP = None
+
+
+async def terminate_process(proc, timeout=10):
+    if not proc or proc.returncode is not None:
+        return
+    proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+
+
+async def queue_worker():
+    while not SHUTTING_DOWN:
+        QUEUE_WAKEUP.clear()
+        try:
+            db = await get_db()
+            try:
+                scan = await claim_next_queued_scan(db)
+            finally:
+                await db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Scan queue could not claim the next item")
+            await asyncio.sleep(1)
+            continue
+
+        if scan:
+            try:
+                await run_scan(
+                    scan["id"],
+                    scan["file_path"],
+                    scan["file_type"],
+                    scan["platform"],
+                    fast_mode=bool(scan["fast_mode"]),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                failure_db = None
+                try:
+                    failure_db = await get_db()
+                    await update_scan_status(
+                        failure_db,
+                        scan["id"],
+                        "failed",
+                        error=f"Queue worker error: {exc}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not persist queue worker failure for scan %s",
+                        scan["id"],
+                    )
+                finally:
+                    if failure_db:
+                        await failure_db.close()
+                await asyncio.sleep(1)
+            continue
+
+        await QUEUE_WAKEUP.wait()
 
 def classify_file(filename):
     name = filename.lower()
@@ -125,8 +236,12 @@ def enhance_report_html(html, scan_id):
     return re.sub(r'<pre><code>(.*?)</code></pre>', _code_repl, html, flags=re.DOTALL)
 
 async def run_scan(scan_id: int, file_path: str, file_type: str, platform: str, fast_mode: bool = False):
+    global ACTIVE_PROCESS
     from database.db import get_db
     db = await get_db()
+    proc = None
+    output_tasks = []
+    heartbeat_task = None
     try:
         await update_scan_status(db, scan_id, "running", 5, "init")
         await insert_log(db, scan_id, "info", f"Starting scan for {file_path}")
@@ -162,43 +277,41 @@ async def run_scan(scan_id: int, file_path: str, file_type: str, platform: str, 
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        ACTIVE_PROCESS = proc
 
         last_line_time = time.monotonic()
         scan_started = time.monotonic()
 
-        # Stream stdout lines to DB logs in real-time (no pipe-buffer deadlock)
-        async def _stream_output():
+        async def _stream_output(stream, stderr=False):
             nonlocal last_line_time
-            line_count = 0
-            async for line in proc.stdout:
+            async for line in stream:
                 text = line.decode(errors="ignore").strip()
-                if text:
-                    last_line_time = time.monotonic()
-                    line_count += 1
-                    level = "info"
-                    if text.startswith("[-]"): level = "error"
-                    elif text.startswith("[!]"): level = "warning"
-                    elif text.startswith("[+]"): level = "info"
-                    await insert_log(db, scan_id, level, text)
-                    m = re.search(r"=== Phase (\d): ([A-Z]+) ===", text)
-                    if m:
-                        phase_no = int(m.group(1))
-                        phase_name = m.group(2).lower()
-                        prog_map = {1: 5, 2: 10, 3: 70, 4: 90}
-                        prog = prog_map.get(phase_no, 10)
-                        await update_scan_status(db, scan_id, "running", prog, phase_name)
-                        SCAN_PROGRESS[scan_id] = {"status": "running", "progress": prog, "phase": phase_name}
-                    elif text.startswith("[+] Temuan mentah:"):
-                        await update_scan_status(db, scan_id, "running", 85, "analyze")
-                        SCAN_PROGRESS[scan_id] = {"status": "running", "progress": 85, "phase": "analyze"}
-            async for line in proc.stderr:
-                text = line.decode(errors="ignore").strip()
-                if text:
-                    last_line_time = time.monotonic()
+                if not text:
+                    continue
+                last_line_time = time.monotonic()
+                if stderr:
                     await insert_log(db, scan_id, "warning", f"STDERR: {text}")
+                    continue
+
+                level = "info"
+                if text.startswith("[-]"): level = "error"
+                elif text.startswith("[!]"): level = "warning"
+                await insert_log(db, scan_id, level, text)
+                m = re.search(r"=== Phase (\d): ([A-Z]+) ===", text)
+                if m:
+                    phase_no = int(m.group(1))
+                    phase_name = m.group(2).lower()
+                    prog_map = {1: 5, 2: 10, 3: 70, 4: 90}
+                    prog = prog_map.get(phase_no, 10)
+                    await update_scan_status(db, scan_id, "running", prog, phase_name)
+                    SCAN_PROGRESS[scan_id] = {"status": "running", "progress": prog, "phase": phase_name}
+                elif text.startswith("[+] Temuan mentah:"):
+                    await update_scan_status(db, scan_id, "running", 85, "analyze")
+                    SCAN_PROGRESS[scan_id] = {"status": "running", "progress": 85, "phase": "analyze"}
 
         async def _heartbeat():
             """Log kalau tools diam >45 detik, supaya user tau masih jalan / macet."""
+            nonlocal last_line_time
             while True:
                 await asyncio.sleep(45)
                 if proc.returncode is not None:
@@ -209,13 +322,18 @@ async def run_scan(scan_id: int, file_path: str, file_type: str, platform: str, 
                     await insert_log(db, scan_id, "warning",
                                      f"[!] Tidak ada output {int(silent)}s — tools masih berjalan (elapsed {elapsed}s), "
                                      f"cek PID {proc.pid}...")
-                    last_line_time = time.monotonic()  # reset, jangan spam tiap 45s
+                    last_line_time = time.monotonic()
 
-        stream_task = asyncio.create_task(_stream_output())
+        output_tasks = [
+            asyncio.create_task(_stream_output(proc.stdout)),
+            asyncio.create_task(_stream_output(proc.stderr, stderr=True)),
+        ]
         heartbeat_task = asyncio.create_task(_heartbeat())
         returncode = await proc.wait()
-        await stream_task
+        await asyncio.gather(*output_tasks)
         heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
 
         if returncode != 0:
             await update_scan_status(db, scan_id, "failed", error="mobile_audit.py exited with code " + str(returncode))
@@ -253,11 +371,35 @@ async def run_scan(scan_id: int, file_path: str, file_type: str, platform: str, 
         await insert_log(db, scan_id, "info", "Scan completed successfully")
         SCAN_PROGRESS[scan_id] = {"status": "completed", "progress": 100}
 
+    except asyncio.CancelledError:
+        await terminate_process(proc)
+        with contextlib.suppress(Exception):
+            await update_scan_status(
+                db, scan_id, "failed", error="Scan interrupted: server shutdown"
+            )
+            await insert_log(db, scan_id, "error", "Scan interrupted: server shutdown")
+        SCAN_PROGRESS[scan_id] = {
+            "status": "failed",
+            "error": "Scan interrupted: server shutdown",
+        }
+        raise
     except Exception as e:
         await update_scan_status(db, scan_id, "failed", error=str(e))
         await insert_log(db, scan_id, "error", f"Exception: {str(e)}")
         SCAN_PROGRESS[scan_id] = {"status": "failed", "error": str(e)}
     finally:
+        for task in output_tasks:
+            if not task.done():
+                task.cancel()
+        if output_tasks:
+            await asyncio.gather(*output_tasks, return_exceptions=True)
+        if heartbeat_task and not heartbeat_task.done():
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
+        await terminate_process(proc)
+        if ACTIVE_PROCESS is proc:
+            ACTIVE_PROCESS = None
         await db.close()
 
 async def parse_manifest(db, scan_id, manifest_path):
@@ -405,6 +547,66 @@ async def parse_endpoints(db, scan_id, endpoints_file):
         await insert_log(db, scan_id, "warning", f"Endpoints parse error: {e}")
 
 
+def safe_upload_filename(filename):
+    normalized = filename.replace("\\", "/")
+    basename = Path(normalized).name
+    if not basename or basename in (".", "..") or "\x00" in basename:
+        raise HTTPException(400, "Invalid filename")
+    return basename
+
+
+def path_is_within(path, root):
+    try:
+        Path(os.path.abspath(path)).relative_to(Path(os.path.abspath(root)))
+        return True
+    except ValueError:
+        return False
+
+
+def check_directory_writable(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    probe = directory / f".healthz-{uuid.uuid4().hex}"
+    try:
+        with open(probe, "xb") as handle:
+            handle.write(b"ok")
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            probe.unlink()
+
+
+@app.get("/healthz")
+async def healthz():
+    checks = {"database": "ok", "uploads": "ok", "results": "ok"}
+    errors = {}
+
+    db = None
+    try:
+        db = await get_db()
+        cursor = await db.execute("SELECT 1")
+        await cursor.fetchone()
+    except Exception as exc:
+        checks["database"] = "error"
+        errors["database"] = "unavailable"
+        logger.warning("Database health check failed: %s", exc)
+    finally:
+        if db:
+            await db.close()
+
+    for name, directory in (("uploads", UPLOAD_DIR), ("results", RESULTS_DIR)):
+        try:
+            check_directory_writable(directory)
+        except Exception as exc:
+            checks[name] = "error"
+            errors[name] = "unavailable"
+            logger.warning("%s directory health check failed: %s", name, exc)
+
+    healthy = not errors
+    payload = {"status": "ok" if healthy else "error", "checks": checks}
+    if errors:
+        payload["errors"] = errors
+    return JSONResponse(payload, status_code=200 if healthy else 503)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, page: int = 1, per_page: int = 10, search: str = "", platform: str = "all", status: str = "all"):
     db = await get_db()
@@ -500,28 +702,47 @@ async def upload_file(request: Request, file: UploadFile = File(...), fast: str 
     if not file.filename:
         raise HTTPException(400, "No file selected")
 
-    file_ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    filename = safe_upload_filename(file.filename)
+    file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if file_ext not in ["apk", "aab", "ipa", "jar", "dex", "smali", "so", "dll", "exe", "hbc", "zip", "xapk", "apks", "apkm"]:
         raise HTTPException(400, f"Unsupported file type: .{file_ext}")
 
-    scan_id = str(uuid.uuid4())[:8]
-    upload_path = UPLOAD_DIR / f"{scan_id}_{file.filename}"
-
-    with open(upload_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
-
-    file_size = len(content)
-    file_type, platform = classify_file(file.filename)
+    scan_id = uuid.uuid4().hex
+    upload_path = UPLOAD_DIR / f"{scan_id}_{filename}"
+    file_size = 0
+    file_created = False
+    stored = False
     fast_mode = fast.lower() in ("1", "true", "yes", "on")
 
-    db = await get_db()
     try:
-        db_id = await insert_scan(db, file.filename, str(upload_path), file_size, file_type, platform, fast_mode=fast_mode)
-    finally:
-        await db.close()
+        with open(upload_path, "xb") as output:
+            file_created = True
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        413,
+                        f"Upload exceeds maximum size of {MAX_UPLOAD_BYTES} bytes",
+                    )
+                output.write(chunk)
 
-    return JSONResponse({"scan_id": db_id, "status": "pending", "filename": file.filename, "fast": fast_mode})
+        file_type, platform = classify_file(filename)
+        db = await get_db()
+        try:
+            db_id = await insert_scan(
+                db, filename, str(upload_path), file_size, file_type, platform,
+                fast_mode=fast_mode,
+            )
+            stored = True
+        finally:
+            await db.close()
+    finally:
+        await file.close()
+        if file_created and not stored:
+            with contextlib.suppress(FileNotFoundError):
+                upload_path.unlink()
+
+    return JSONResponse({"scan_id": db_id, "status": "pending", "filename": filename, "fast": fast_mode})
 
 @app.post("/api/scan/{scan_id}/start")
 async def start_scan(scan_id: int):
@@ -532,9 +753,11 @@ async def start_scan(scan_id: int):
             raise HTTPException(404, "Scan not found")
         if scan["status"] != "pending":
             raise HTTPException(400, f"Scan status is {scan['status']}, only pending scans can be started")
-        fast_mode = bool(scan["fast_mode"])
-        asyncio.create_task(run_scan(scan_id, scan["file_path"], scan["file_type"], scan["platform"], fast_mode=fast_mode))
-        return JSONResponse({"status": "started"})
+        if not await request_scan(db, scan_id):
+            raise HTTPException(409, "Scan was already requested")
+        if QUEUE_WAKEUP:
+            QUEUE_WAKEUP.set()
+        return JSONResponse({"status": "started", "queue_status": "queued"})
     finally:
         await db.close()
 
@@ -546,7 +769,13 @@ async def scan_page(request: Request, scan_id: int):
         if not scan:
             raise HTTPException(404, "Scan not found")
         logs = await get_logs(db, scan_id)
-        return templates.TemplateResponse(request, "scan.html", {"scan": scan, "logs": logs})
+        scan_view = dict(scan)
+        if scan_view["status"] == "queued":
+            scan_view["status"] = "running"
+            scan_view["phase"] = "queued"
+        return templates.TemplateResponse(
+            request, "scan.html", {"scan": scan_view, "logs": logs}
+        )
     finally:
         await db.close()
 
@@ -1048,10 +1277,22 @@ async def api_all_hosts(scan_id: int):
 async def api_delete_scan(scan_id: int):
     db = await get_db()
     try:
-        await delete_scan(db, scan_id)
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        upload_path = Path(scan["file_path"])
+        if path_is_within(upload_path, UPLOAD_DIR):
+            with contextlib.suppress(FileNotFoundError):
+                upload_path.unlink()
+        else:
+            raise HTTPException(500, "Stored upload path is outside upload directory")
+
         scan_dir = RESULTS_DIR / str(scan_id)
+        if not path_is_within(scan_dir, RESULTS_DIR):
+            raise HTTPException(500, "Stored result path is outside result directory")
         if scan_dir.exists():
             shutil.rmtree(scan_dir)
+        await delete_scan(db, scan_id)
         return JSONResponse({"status": "deleted"})
     finally:
         await db.close()
