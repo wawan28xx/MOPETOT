@@ -1,0 +1,30 @@
+.git
+.github
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+*.log
+*.tmp
+*.bak
+.env
+web/.env
+
+web/uploads
+web/results
+web/database/mobile_audit.db*
+reports
+
+# The repository bundles Windows-only binaries. The Linux image uses native
+# packages and keeps only the cross-platform Android tooling.
+bin/jre
+bin/radare2
+bin/dotnet-tools
+bin/il2cppdumper
+bin/blutter_build.bat
+
+*.pdf
+.DS_Store
+Thumbs.db
