@@ -137,6 +137,11 @@ Jenkins adalah satu-satunya CI/CD production. Push ke branch `master` menjalanka
 
 Jenkins job memakai repository public `wawan28xx/MOPETOT`, trigger webhook GitHub, dan polling lima-menit sebagai fallback. Agent `k3s-platform-prod-kubeconfig` harus memiliki Docker, izin import image melalui `sudo -n k3s ctr`, serta kubeconfig terbatas `/home/deit/.kube/mopetot-config`.
 
+Webhook repository menggunakan event **push** dengan Payload URL
+`https://jenkins.pentest.web.id/github-webhook/` dan content type
+`application/json`. Jika webhook belum dipasang, polling SCM tetap mendeteksi
+perubahan `master` paling lambat sekitar lima menit.
+
 Manifest production dan script provisioning berada di `/home/deit/defendit-k8s`:
 
 - `platform-prod/mopetot-prod.yaml`
