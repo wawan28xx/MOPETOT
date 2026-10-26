@@ -43,6 +43,10 @@
             <span>⚡ Live Verifier</span>
             <span class="tab-badge" id="tab-6-badge">-</span>
         </button>
+        <button class="tab" data-tab="8" onclick="showTab(8)">
+            <span>🔍 Code Explorer</span>
+            <span class="tab-badge" id="tab-8-badge">-</span>
+        </button>
         <button class="tab" data-tab="7" onclick="showTab(7)">
             <span>📜 Logs</span>
             <span class="tab-badge">{{ logs|length if logs else 0 }}</span>
@@ -121,6 +125,14 @@
         <div class="tab-data" id="tab-6-data" style="display:none"></div>
     </div>
 
+    <!-- TAB 8: CODE EXPLORER -->
+    <div class="tab-pane" id="tab-8-content" style="display:none">
+        <div class="tab-loading" id="tab-8-loading">
+            <div class="spinner-text">Memuat file tree corpus...</div>
+        </div>
+        <div class="tab-data" id="tab-8-data" style="display:none"></div>
+    </div>
+
     <!-- TAB 7: LOGS -->
     <div class="tab-pane" id="tab-7-content" style="display:none">
         {% if logs %}
@@ -188,6 +200,82 @@
         <div class="ctx-modal-footer">
             <span id="verify-modal-verdict" class="ctx-sev-chip"></span>
             <button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="closeVerifyModalDirect()">Tutup</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     FLOATING VERIFICATION ASSISTANT (AI CHATBOX)
+     Tailwind hanya untuk popup AI; preflight OFF agar style app tetap utuh.
+     ============================================================ -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+    tailwind.config = { corePlugins: { preflight: false } };
+</script>
+<!-- highlight.js: syntax coloring ala VS Code (theme vs2015 = Dark+ palette).
+     Dipakai tab Code Explorer; fallback ke tokenizer regex bila CDN offline. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<button id="chat-fab" onclick="toggleAssistant()" title="Verification Assistant (AI)"
+        class="fixed bottom-6 right-6 z-[1100] h-14 w-14 flex items-center justify-center rounded-full
+               bg-gradient-to-br from-purple-500 to-indigo-600 text-2xl select-none cursor-pointer
+               border border-purple-300/30 shadow-lg shadow-purple-500/40
+               transition-all duration-200 hover:scale-110 hover:shadow-purple-500/60 hover:rotate-3
+               active:scale-95">🤖</button>
+<div id="chat-popup" style="display:none;"
+     class="fixed right-0 top-0 bottom-0 z-[1100] flex flex-col w-[420px] max-w-[100vw]
+            bg-[var(--bg-card)] border-l border-[var(--border)]
+            shadow-2xl shadow-black/40">
+    <!-- HEADER -->
+    <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[var(--border)]
+                bg-gradient-to-r from-purple-600/25 via-indigo-600/15 to-transparent">
+        <div class="h-9 w-9 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/30 to-indigo-600/30 border border-purple-400/30 text-lg shrink-0">🤖</div>
+        <div class="flex-1 min-w-0">
+            <div class="text-[13px] font-bold text-[var(--text-primary)] leading-tight truncate">Verification Assistant</div>
+            <span id="chat-status-chip"
+                  class="inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border
+                         border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)]
+                         max-w-full truncate align-middle">● memuat konfigurasi...</span>
+        </div>
+        <button onclick="toggleAssistant()" title="Tutup"
+                class="shrink-0 h-8 w-8 flex items-center justify-center rounded-lg text-lg leading-none cursor-pointer
+                       text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]
+                       bg-transparent border-none transition-colors">&times;</button>
+    </div>
+    <!-- BODY -->
+    <div class="flex flex-col gap-2.5 p-3.5 flex-1 min-h-0">
+        <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[11px] font-semibold text-[var(--text-muted)] whitespace-nowrap">Konteks temuan:</span>
+            <select id="chat-secret-select" onchange="onAssistantFindingChange()"
+                    class="flex-1 min-w-[130px] text-[11px] rounded-lg px-2.5 py-1.5 cursor-pointer
+                           bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)]
+                           focus:outline-none focus:border-purple-400 transition-colors"></select>
+            <button onclick="clearAssistantChat()" title="Hapus riwayat chat temuan ini"
+                    class="shrink-0 h-[30px] px-2.5 rounded-lg text-xs cursor-pointer bg-transparent
+                           border border-[var(--border)] text-[var(--text-muted)]
+                           hover:text-red-400 hover:border-red-400/50 hover:bg-red-500/10 transition-all">🗑</button>
+        </div>
+        <div id="chat-messages"
+             class="flex flex-col gap-2.5 flex-1 min-h-0 overflow-y-auto
+                    p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)]">
+            <div class="text-center text-xs text-[var(--text-muted)] py-5 px-3 leading-relaxed">
+                Pilih temuan &amp; tanya apa saja: tipe kredensial, attack path,<br> cara verifikasi aman, atau draft laporan bug bounty.<br>
+                <span class="text-purple-400/80">🔒 Nilai secret selalu ter-mask sebelum dikirim ke AI.</span>
+            </div>
+        </div>
+        <div class="flex gap-2 items-end shrink-0">
+            <textarea id="chat-input" rows="2"
+                      placeholder="Contoh: analisis exploitability temuan ini &amp; beri langkah verifikasi aman... (Enter kirim, Shift+Enter baris baru)"
+                      class="flex-1 resize-none rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed
+                             bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)]
+                             placeholder:text-[var(--text-muted)] font-[family-name:var(--font-mono)]
+                             focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400/30
+                             transition-colors"></textarea>
+            <button id="chat-send-btn" onclick="sendAssistantMessage()"
+                    class="shrink-0 h-[42px] px-4 rounded-xl text-[13px] font-bold text-white cursor-pointer
+                           bg-gradient-to-r from-purple-500 to-indigo-600 border border-purple-300/30
+                           shadow-md shadow-purple-500/25 hover:shadow-purple-500/40 hover:brightness-110
+                           disabled:opacity-50 disabled:cursor-not-allowed transition-all">Kirim ➤</button>
         </div>
     </div>
 </div>
@@ -264,6 +352,7 @@ function loadTabContent(n) {
     else if (n === 4) loadNetwork();
     else if (n === 5) loadFindings();
     else if (n === 6) loadLiveVerifier();
+    else if (n === 8) loadCodeExplorer();
 }
 
 function showTabData(n) {
@@ -294,6 +383,16 @@ function escHtml(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function escJs(s) {
+    // escape untuk inline JS string (onclick="fn('...')")
+    if (s === null || s === undefined) return '';
+    return String(s)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '')
+        .replace(/\n/g, '\\n');
 }
 
 function sevBadge(sev) {
@@ -894,21 +993,13 @@ function classifyPiiSubtype(s) {
     if (r.includes('phone') || r.includes('handphone') || r.includes('telepon') || r.includes('nohp') || /^08\d{8,11}$/.test((s.match||'').trim())) {
         return 'phone';
     }
-    // 4. Nomor Rekening & Kartu Bank
-    if (r.includes('bank') || r.includes('rekening') || r.includes('card') || r.includes('credit_card') || r.includes('account_number')) {
-        return 'bank';
-    }
-    // 5. NIK / KTP / Identitas
-    if (r.includes('nik') || r.includes('ktp') || r.includes('passport') || r.includes('identity')) {
-        return 'identity';
-    }
     return 'other';
 }
 
 function isPiiItem(s) {
     const c = (s.category || '').toLowerCase();
     const r = (s.rule_id || '').toLowerCase();
-    return c === 'pii' || c === 'credentials' || r.includes('password') || r.includes('email') || r.includes('phone') || r.includes('rekening') || r.includes('nik');
+    return c === 'pii' || c === 'credentials' || r.includes('password') || r.includes('email') || r.includes('phone');
 }
 
 function loadSecrets() {
@@ -938,8 +1029,6 @@ function renderSecretsTable() {
         const passCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'password').length;
         const emailCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'email').length;
         const phoneCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'phone').length;
-        const bankCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'bank').length;
-        const idCount = allPiiItems.filter(s => classifyPiiSubtype(s) === 'identity').length;
 
         html += '<div class="subcat-nested" id="pii-nested-bar">';
         html += '<span class="subcat-nested-title">Sub-Tipe PII:</span>';
@@ -947,10 +1036,6 @@ function renderSecretsTable() {
         html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'password' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'password\', this)">🔑 Password (' + passCount + ')</button>';
         html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'email' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'email\', this)">📧 Email (' + emailCount + ')</button>';
         html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'phone' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'phone\', this)">📱 Nomor HP (' + phoneCount + ')</button>';
-        html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'bank' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'bank\', this)">💳 Rekening / Kartu (' + bankCount + ')</button>';
-        if (idCount > 0) {
-            html += '<button class="subcat-btn-nested' + (activePiiSubCategory === 'identity' ? ' active' : '') + '" onclick="filterPiiSubCategory(\'identity\', this)">👤 NIK / Identitas (' + idCount + ')</button>';
-        }
         html += '</div>';
     }
 
@@ -997,8 +1082,6 @@ function renderSecretsTable() {
             if (ptype === 'password') piiBadgeHtml = '<br><span class="pii-tag pii-tag-pass">🔑 Password</span>';
             else if (ptype === 'email') piiBadgeHtml = '<br><span class="pii-tag pii-tag-email">📧 Email</span>';
             else if (ptype === 'phone') piiBadgeHtml = '<br><span class="pii-tag pii-tag-phone">📱 No. HP</span>';
-            else if (ptype === 'bank') piiBadgeHtml = '<br><span class="pii-tag pii-tag-bank">💳 Rekening/Kartu</span>';
-            else if (ptype === 'identity') piiBadgeHtml = '<br><span class="pii-tag pii-tag-id">👤 NIK/KTP</span>';
         }
 
         const secretKey = 'sec_tab3_' + idx;
@@ -1013,7 +1096,10 @@ function renderSecretsTable() {
 
         html += '<tr class="secret-row">';
         html += '<td>' + sevBadge(sev) + '</td>';
-        html += '<td><span class="rule-chip">' + escHtml(rule) + '</span><br><span class="cat-label">' + escHtml(cat) + '</span>' + piiBadgeHtml + '</td>';
+        html += '<td><span class="rule-chip">' + escHtml(rule) + '</span><br><span class="cat-label">' + escHtml(cat) + '</span>' + piiBadgeHtml +
+                (s.id ? '<br><span style="white-space:nowrap;">' +
+                    '<button class="btn-chat-assist" onclick="openInCodeExplorer(\'' + escJs(s.file_path || '') + '\',' + (parseInt(line) || 0) + ')" title="Buka file di Code Explorer">📂 Explorer</button> ' +
+                    '<button class="btn-chat-assist" onclick="openAssistantWithFinding(' + s.id + ')" title="Tanya Verification Assistant tentang temuan ini">🤖 Tanya AI</button></span>' : '') + '</td>';
         html += '<td>';
         html += '<span class="clickable-secret" data-secret-key="' + secretKey + '" title="Klik untuk membuka source code context">';
         html += '<span class="hardcoded-highlight">' + escHtml(matchVal.substring(0, 100)) + '</span>';
@@ -1521,6 +1607,931 @@ function loadLiveVerifier() {
 
     initPocSection();
 }
+
+/* ---------------------------------------------------------------
+   VERIFICATION ASSISTANT (FLOATING AI CHATBOX)
+--------------------------------------------------------------- */
+let assistantSecretId = null;
+let assistantMessages = [];   // [{role: 'user'|'assistant', content}]
+let assistantBusy = false;
+let assistantSecretsLoaded = false;
+
+function toggleAssistant() {
+    const pop = document.getElementById('chat-popup');
+    if (!pop) return;
+    const willOpen = pop.style.display === 'none';
+    pop.style.display = willOpen ? 'flex' : 'none';
+    document.body.classList.toggle('chat-open', willOpen);
+    if (willOpen) {
+        initAssistant();
+        const inp = document.getElementById('chat-input');
+        if (inp) inp.focus();
+    }
+}
+
+// Enter = kirim, Shift+Enter = baris baru
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey && e.target && e.target.id === 'chat-input') {
+        e.preventDefault();
+        sendAssistantMessage();
+    }
+});
+
+function populateAssistantFindings() {
+    const sel = document.getElementById('chat-secret-select');
+    if (!sel) return;
+    let opts = '<option value="">— Tanya tanpa konteks temuan —</option>';
+    globalSecrets.forEach(function(s) {
+        const label = (s.rule_id || s.rule || '?') + ' · ' + ((s.file_path || '').split(/[/\\]/).pop() || '?');
+        opts += '<option value="' + s.id + '">' + escHtml(label.substring(0, 90)) + '</option>';
+    });
+    sel.innerHTML = opts;
+    if (window._assistantPendingSecret !== undefined && window._assistantPendingSecret !== null) {
+        sel.value = String(window._assistantPendingSecret);
+        window._assistantPendingSecret = null;
+        onAssistantFindingChange();
+    }
+}
+
+function initAssistant() {
+    fetchAssistantConfig();
+    if (assistantSecretsLoaded) return;
+    fetch('/api/scan/' + SCAN_ID + '/secrets')
+        .then(function(r) { return r.json(); })
+        .then(function(rows) {
+            globalSecrets = rows || [];
+            assistantSecretsLoaded = true;
+            populateAssistantFindings();
+            if (window._assistantPendingSecret === undefined || window._assistantPendingSecret === null) {
+                onAssistantFindingChange();
+            }
+        })
+        .catch(function() {});
+}
+
+const CHAT_CHIP_OK = 'inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-500/40 bg-green-500/15 text-green-400 max-w-full truncate align-middle';
+const CHAT_CHIP_ERR = 'inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-500/40 bg-red-500/15 text-red-400 max-w-full truncate align-middle';
+
+function fetchAssistantConfig() {
+    fetch('/api/scan/' + SCAN_ID + '/chat/config')
+        .then(function(r) { return r.json(); })
+        .then(function(cfg) {
+            const chip = document.getElementById('chat-status-chip');
+            if (!chip) return;
+            if (cfg.configured) {
+                chip.innerText = '● ' + cfg.provider + ' / ' + cfg.model;
+                chip.className = CHAT_CHIP_OK;
+            } else {
+                chip.innerText = '● OFFLINE — set env: ' + (cfg.missing_env || []).join(', ');
+                chip.className = CHAT_CHIP_ERR;
+            }
+        })
+        .catch(function() {});
+}
+
+function onAssistantFindingChange() {
+    const sel = document.getElementById('chat-secret-select');
+    assistantSecretId = (sel && sel.value) ? parseInt(sel.value) : null;
+    assistantMessages = [];
+    loadAssistantHistory();
+}
+
+function loadAssistantHistory() {
+    const url = '/api/scan/' + SCAN_ID + '/chat/history' + (assistantSecretId ? '?secret_id=' + assistantSecretId : '');
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(rows) {
+            assistantMessages = (rows || []).map(function(r) { return {role: r.role, content: r.content}; });
+            renderAssistantMessages();
+        })
+        .catch(function() { renderAssistantMessages(); });
+}
+
+const CHAT_BUBBLE_USER = 'self-end max-w-[85%] rounded-2xl rounded-br-md px-3.5 py-2.5 text-[13px] leading-relaxed border border-blue-400/30 bg-blue-500/15';
+const CHAT_BUBBLE_BOT = 'self-start max-w-[88%] rounded-2xl rounded-bl-md px-3.5 py-2.5 text-[13px] leading-relaxed border border-[var(--border)] bg-[var(--bg-card)]';
+const CHAT_MSG_ROLE = 'text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1';
+
+function renderAssistantMessages() {
+    const box = document.getElementById('chat-messages');
+    if (!box) return;
+    if (!assistantMessages.length) {
+        box.innerHTML = '<div class="text-center text-xs text-[var(--text-muted)] py-5 px-3 leading-relaxed">Belum ada percakapan untuk temuan ini.<br>Pilih temuan lalu tanya apa saja tentang verifikasinya.</div>';
+        return;
+    }
+    let html = '';
+    assistantMessages.forEach(function(m) {
+        const cls = m.role === 'user' ? CHAT_BUBBLE_USER : CHAT_BUBBLE_BOT;
+        const icon = m.role === 'user' ? '🧑‍💻 Hunter' : '🤖 Assistant';
+        html += '<div class="' + cls + '"><div class="' + CHAT_MSG_ROLE + '">' + icon + '</div><div class="whitespace-pre-wrap break-words">' + escHtml(m.content) + '</div></div>';
+    });
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+}
+
+function sendAssistantMessage() {
+    const inp = document.getElementById('chat-input');
+    const btn = document.getElementById('chat-send-btn');
+    const box = document.getElementById('chat-messages');
+    if (assistantBusy) return;
+    const msg = (inp.value || '').trim();
+    if (!msg) return;
+    inp.value = '';
+    assistantBusy = true;
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ Menunggu AI...'; }
+
+    assistantMessages.push({role: 'user', content: msg});
+    renderAssistantMessages();
+    const thinking = document.createElement('div');
+    thinking.className = CHAT_BUBBLE_BOT;
+    thinking.id = 'chat-thinking';
+    thinking.innerHTML = '<div class="' + CHAT_MSG_ROLE + '">🤖 Assistant</div><div class="italic text-[var(--text-muted)]"><span class="inline-block animate-pulse">⏳ Menganalisis temuan...</span></div>';
+    if (box) { box.appendChild(thinking); box.scrollTop = box.scrollHeight; }
+
+    const body = {message: msg};
+    if (assistantSecretId) body.secret_id = assistantSecretId;
+    fetch('/api/scan/' + SCAN_ID + '/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+    .then(function(res) {
+        const t = document.getElementById('chat-thinking');
+        if (t) t.remove();
+        if (res.ok && res.j.reply) {
+            assistantMessages.push({role: 'assistant', content: res.j.reply});
+        } else {
+            assistantMessages.push({role: 'assistant', content: '❌ ' + (res.j.detail || res.j.error || 'Gagal menghubungi AI.')});
+        }
+        renderAssistantMessages();
+    })
+    .catch(function() {
+        const t = document.getElementById('chat-thinking');
+        if (t) t.remove();
+        assistantMessages.push({role: 'assistant', content: '❌ Gagal terhubung ke server.'});
+        renderAssistantMessages();
+    })
+    .finally(function() {
+        assistantBusy = false;
+        if (btn) { btn.disabled = false; btn.innerText = 'Kirim ➤'; }
+    });
+}
+
+function clearAssistantChat() {
+    const url = '/api/scan/' + SCAN_ID + '/chat/history' + (assistantSecretId ? '?secret_id=' + assistantSecretId : '');
+    fetch(url, {method: 'DELETE'})
+        .then(function() {
+            assistantMessages = [];
+            renderAssistantMessages();
+        })
+        .catch(function() {});
+}
+
+function openAssistantWithFinding(secretId) {
+    window._assistantPendingSecret = secretId;
+    const pop = document.getElementById('chat-popup');
+    const wasOpen = pop && pop.style.display !== 'none';
+    if (!wasOpen) {
+        toggleAssistant();
+    }
+    if (assistantSecretsLoaded) {
+        populateAssistantFindings();  // apply pending selection sekarang
+    }
+    // kalau secrets belum ter-load, fetch di initAssistant akan apply pending-nya
+}
+
+/* ---------------------------------------------------------------
+   TAB 8: CODE EXPLORER — browse & grep corpus (100% offline)
+   See design/CODE_EXPLORER_DESIGN.md
+--------------------------------------------------------------- */
+let CE = {
+    loaded: false,           // root tree sudah di-fetch
+    topDirs: [],             // direktori level-1 (dari listing root)
+    expanded: {},             // folder yang di-expand
+    dirCache: {},            // cache listing per folder {dir: data}
+    selectedFile: null,      // file aktif di viewer (untuk state tree)
+    matches: [],             // hasil grep aktif [{path, line_no, line_text}]
+    query: '', regexOn: false, caseOn: false,
+    truncated: false,
+    curFile: null, fileData: null,
+    lang: null,                 // bahasa hljs file aktif (null = pakai fallback regex)
+    hlCache: {},                // cache syntax per file: {lineNo: html}
+    focusLine: 0, highlightQuery: '',
+    find: {open: false, query: '', regexOn: false, caseOn: false, idx: 0, count: 0, timer: null},  // popup find-in-file
+    activeMatchIdx: 0,        // index match aktif di file viewer
+    pendingOpen: null,       // {file, line} saat tab belum ter-load
+    busy: false,
+    filterTimer: null,
+};
+
+function loadCodeExplorer() {
+    const d = document.getElementById('tab-8-data');
+    if (!d) return;
+    showTabData(8);
+    if (CE.loaded) return;
+    d.innerHTML = '<div class="tab-loading"><div class="spinner-text">Memuat file tree corpus...</div></div>';
+    ceFetchDir('').then(function(rootData) {
+        CE.topDirs = rootData.dirs || [];
+        CE.dirCache[''] = rootData;
+        CE.loaded = true;
+        renderCodeExplorer();
+        if (CE.pendingOpen) {
+            const p = CE.pendingOpen;
+            CE.pendingOpen = null;
+            ceOpenFile(p.file, p.line);
+        }
+    }).catch(function(err) {
+        d.innerHTML = '<div class="error-box"><h3>Error</h3><pre>' + escHtml(String(err)) + '</pre></div>';
+    });
+}
+
+function renderCodeExplorer() {
+    const d = document.getElementById('tab-8-data');
+    if (!d) return;
+
+    // ekstensi filter statis (umum) — scope dir dinamis dari listing root
+    const exts = ['.java', '.kt', '.smali', '.js', '.ts', '.json', '.xml', '.yaml', '.yml', '.properties', '.md', '.txt', '.c', '.cpp', '.h', '.py', '.dart'];
+    const INPUT_CLS = 'rounded-md px-3 py-2 text-[13px] font-mono bg-[#1e1e1e] border border-[#3c3c3c] text-[#d4d4d4] focus:outline-none focus:border-[#007acc] focus:ring-1 focus:ring-[#007acc]/50 transition-colors placeholder:text-[#6a6a6a]';
+    const SELECT_CLS = 'rounded-md px-2.5 py-2 text-[11px] bg-[#1e1e1e] border border-[#3c3c3c] text-[#cccccc] cursor-pointer focus:outline-none focus:border-[#007acc]';
+    // Chrome ala VS Code: editor #1e1e1e, sidebar #252526, header/footer #2d2d30, border #2b2b2b
+    const PANEL_CLS = 'flex flex-col rounded-lg border border-[#2b2b2b] overflow-hidden';
+    const HEAD_CLS = 'flex items-center gap-2 flex-wrap px-3 py-2 border-b border-[#2b2b2b] bg-[#2d2d30] text-[#cccccc]';
+    const FOOT_CLS = 'px-3 py-1.5 text-[10px] text-[#858585] border-t border-[#2b2b2b] bg-[#2d2d30]';
+
+    let html = '';
+    // ===== toolbar grep =====
+    html += '<div class="flex items-center gap-2.5 flex-wrap px-4 py-2.5 mb-3 rounded-lg bg-[#252526] border border-[#2b2b2b]">';
+    html += '<span class="text-base">🔍</span>';
+    html += '<input id="ce-q" class="flex-1 min-w-[240px] max-w-[520px] ' + INPUT_CLS + '" placeholder="grep corpus... (Enter = cari)" value="' + escHtml(CE.query) + '">';
+    html += '<label class="flex items-center gap-1 text-[11px] text-[#cccccc] cursor-pointer"><input type="checkbox" id="ce-regex"' + (CE.regexOn ? ' checked' : '') + '> regex</label>';
+    html += '<label class="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer"><input type="checkbox" id="ce-case"' + (CE.caseOn ? ' checked' : '') + '> Aa</label>';
+    html += '<button class="px-4 py-2 rounded-lg text-[12px] font-bold text-white cursor-pointer bg-gradient-to-r from-purple-500 to-indigo-600 border border-purple-300/30 shadow-md shadow-purple-500/25 hover:brightness-110 transition-all" onclick="ceDoSearch()">Cari</button>';
+    html += '<button id="ce-res-btn" class="hidden px-3 py-2 rounded-lg text-[11px] font-bold text-purple-300 bg-purple-500/10 border border-purple-400/40 cursor-pointer hover:bg-purple-500/25 transition-all" onclick="ceGrepModalOpen()" title="Buka lagi hasil grep terakhir">📄 Hasil (<span id="ce-res-count">0</span>)</button>';
+    html += '<select id="ce-scope" class="' + SELECT_CLS + '"><option value="">Seluruh corpus</option>';
+    CE.topDirs.forEach(function(dir) {
+        html += '<option value="' + escHtml(dir) + '">' + escHtml(dir) + '/</option>';
+    });
+    html += '</select>';
+    html += '<select id="ce-ext" class="' + SELECT_CLS + '"><option value="">semua tipe</option>';
+    exts.forEach(function(e) { html += '<option value="' + e + '">' + e + '</option>'; });
+    html += '</select>';
+    html += '<span class="ml-auto text-[11px] text-[var(--text-muted)] font-mono" id="ce-status">🟢 100% offline · grep lokal di corpus scan</span>';
+    html += '</div>';
+
+    // ===== 3 panel =====
+    html += '<div class="flex gap-0 h-[600px] min-h-[420px]">';
+    // tree (sidebar VS Code)
+    html += '<div class="w-[230px] shrink-0 bg-[#252526] ' + PANEL_CLS + '">';
+    html += '<div class="flex flex-col gap-1.5 px-2.5 py-2 border-b border-[#2b2b2b] bg-[#2d2d30]">';
+    html += '<span class="text-[11px] font-bold text-[#cccccc] uppercase tracking-wide">📁 Explorer — corpus/</span>';
+    html += '<input id="ce-tree-filter" class="w-full rounded-md px-2 py-1 text-[11px] bg-[#1e1e1e] border border-[#3c3c3c] text-[#d4d4d4] focus:outline-none focus:border-[#007acc]" placeholder="filter file..." oninput="ceFilterTree(this.value)">';
+    html += '</div>';
+    html += '<div class="flex-1 overflow-y-auto p-1.5" id="ce-tree">' + ceDirHtml(CE.dirCache['']) + '</div>';
+    html += '<div class="' + FOOT_CLS + '" id="ce-tree-count">' + ((CE.dirCache[''] && CE.dirCache[''].total_files) || 0) + ' file di level ini</div>';
+    html += '</div>';
+    // results (sidebar VS Code)
+    // viewer (editor VS Code)
+    html += '<div class="flex-1 min-w-0 bg-[#1e1e1e] relative ' + PANEL_CLS + '" id="ce-viewer-panel">';
+    // popup find-in-file ala jadx/VS Code (Ctrl+F)
+    html += '<div id="ce-find" class="absolute top-1.5 right-2 z-20 flex items-center gap-1 px-1.5 py-1 rounded-md bg-[#252526] border border-[#3c3c3c] shadow-lg" style="display:none">';
+    html += '<input id="ce-find-q" class="w-[190px] bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-[12px] font-mono text-[#d4d4d4] focus:outline-none focus:border-[#007acc]" placeholder="cari di file ini...">';
+    html += '<button id="ce-find-case" onclick="ceFindToggle(\'case\')" title="Match case" class="ce-find-tog">Aa</button>';
+    html += '<button id="ce-find-regex" onclick="ceFindToggle(\'regex\')" title="Regex" class="ce-find-tog">.*</button>';
+    html += '<span id="ce-find-count" class="text-[10px] text-[#858585] font-mono min-w-[42px] text-center">0/0</span>';
+    html += '<button onclick="ceFindNav(-1)" title="Sebelumnya (Shift+Enter)" class="ce-find-tog">▲</button>';
+    html += '<button onclick="ceFindNav(1)" title="Berikutnya (Enter)" class="ce-find-tog">▼</button>';
+    html += '<button onclick="ceFindClose()" title="Tutup (Esc)" class="ce-find-tog">✕</button>';
+    html += '</div>';
+    html += '<div class="' + HEAD_CLS + ' text-[11px]" id="ce-viewer-head"><span class="text-[#858585]">Pilih file dari tree / hasil grep</span></div>';
+    html += '<div class="flex-1 overflow-auto p-2" id="ce-viewer"><div class="text-center text-[12px] text-[#858585] py-8">Belum ada file terbuka.</div></div>';
+    // footer viewer = status bar VS Code (biru #007acc)
+    html += '<div class="px-3 py-1.5 text-[10px] text-white bg-[#007acc]" id="ce-viewer-foot"></div>';
+    html += '</div>';
+    html += '</div>';
+
+    // ===== POPUP HASIL GREP (dialog ala jadx-gui search) =====
+    html += '<div id="ce-grep-modal" class="fixed inset-0 z-30 flex items-start justify-center pt-16 px-4 bg-black/50" style="display:none" onclick="ceGrepModalClose(event)">';
+    html += '<div class="w-[740px] max-w-full flex flex-col rounded-lg bg-[#1e1e1e] border border-[#2b2b2b] shadow-2xl max-h-[74vh]" onclick="event.stopPropagation()">';
+    html += '<div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[#2b2b2b] bg-[#2d2d30]">';
+    html += '<span class="text-base">🔍</span>';
+    html += '<span class="text-[13px] font-bold text-white">Hasil grep — <span class="font-mono text-purple-300" id="ce-grep-q-label"></span></span>';
+    html += '<span id="ce-grep-count" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono"></span>';
+    html += '<span id="ce-grep-meta" class="text-[10px] text-[#858585] font-mono ml-auto"></span>';
+    html += '<button class="w-7 h-7 flex items-center justify-center rounded text-[16px] text-[#cccccc] bg-transparent border-none cursor-pointer hover:bg-[#2a2d2e] hover:text-white" onclick="ceGrepModalCloseDirect()" title="Tutup (Esc)">&times;</button>';
+    html += '</div>';
+    html += '<div class="flex-1 overflow-y-auto p-2" id="ce-grep-results"></div>';
+    html += '<div class="px-4 py-1.5 text-[10px] text-[#858585] border-t border-[#2b2b2b] bg-[#2d2d30]">Klik baris = buka file &amp; scroll ke baris · Esc = tutup</div>';
+    html += '</div>';
+    html += '</div>';
+
+    d.innerHTML = html;
+
+    document.getElementById('ce-q').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') ceDoSearch();
+    });
+
+    // ---- event popup find-in-file (ala jadx-gui) ----
+    const findInput = document.getElementById('ce-find-q');
+    if (findInput) {
+        findInput.addEventListener('input', function() { ceFindOnInput(this.value); });
+        findInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); ceFindNav(e.shiftKey ? -1 : 1); }
+            else if (e.key === 'Escape') { e.preventDefault(); ceFindClose(); }
+            e.stopPropagation();
+        });
+    }
+}
+
+/* ---------- FILE TREE (lazy per-direktori via /tree?dir=) ---------- */
+function ceFetchDir(dir) {
+    return fetch('/api/scan/' + SCAN_ID + '/tree?dir=' + encodeURIComponent(dir))
+        .then(function(r) {
+            return r.json().then(function(j) { return {ok: r.ok, j: j}; });
+        })
+        .then(function(res) {
+            if (!res.ok || res.j.detail) throw (res.j.detail || 'HTTP error');
+            return res.j;
+        });
+}
+
+const CE_NODE_CLS = 'flex items-center gap-1 px-2 py-[3px] rounded text-[12px] cursor-pointer whitespace-nowrap truncate text-[#cccccc] hover:bg-[#2a2d2e] hover:text-white';
+const CE_NODE_FILE_CLS = CE_NODE_CLS + ' font-mono';
+
+function ceDirHtml(data) {
+    // render listing satu direktori: subfolder + file (dengan selected state)
+    let html = '';
+    (data.dirs || []).forEach(function(sub) {
+        const p = data.dir ? data.dir + '/' + sub : sub;
+        html += '<div class="' + CE_NODE_CLS + '" data-dir="' + escHtml(p) + '" onclick="ceToggleDir(\'' + escJs(p) + '\', this)">' +
+                '<span class="w-3 text-[var(--text-muted)] text-[10px] text-center">' + (CE.expanded[p] ? '▾' : '▸') + '</span><span>📁 ' + escHtml(sub) + '</span></div>';
+        if (CE.expanded[p] && CE.dirCache[p]) {
+            html += '<div class="ml-3 border-l border-[var(--border)] pl-1">' + ceDirHtml(CE.dirCache[p]) + '</div>';
+        } else if (CE.expanded[p]) {
+            html += '<div class="ml-3 border-l border-[var(--border)] pl-1"><div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">⏳ memuat…</div></div>';
+        }
+    });
+    (data.files || []).forEach(function(f) {
+        const p = data.dir ? data.dir + '/' + f.name : f.name;
+        const sel = (p === CE.selectedFile) ? ' ce-sel' : '';
+        html += '<div class="' + CE_NODE_FILE_CLS + sel + '" data-file="' + escHtml(p) + '" title="' + escHtml(p) + '" onclick="ceOpenFile(\'' + escJs(p) + '\')">' +
+                '<span class="w-3"></span><span class="truncate">📄 ' + escHtml(f.name) + '</span></div>';
+    });
+    if (data.truncated) {
+        html += '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)] text-[10px] cursor-default">… +' + (data.total_files - (data.files || []).length) + ' file lain (pakai grep)</div>';
+    }
+    return html;
+}
+
+function ceMarkSelected() {
+    // update highlight file terpilih di seluruh tree
+    document.querySelectorAll('#ce-tree .ce-sel').forEach(function(el) { el.classList.remove('ce-sel'); });
+    const el = document.querySelector('#ce-tree [data-file="' + CE.selectedFile + '"]');
+    if (el) el.classList.add('ce-sel');
+}
+
+function ceFilterTree(q) {
+    // debounce lalu cari nama file global via /tree?filter= (server: rg --files)
+    clearTimeout(CE.filterTimer);
+    q = (q || '').trim();
+    if (!q) {
+        document.getElementById('ce-tree').innerHTML = ceDirHtml(CE.dirCache['']);
+        ceMarkSelected();
+        return;
+    }
+    if (q.length < 2) return;
+    CE.filterTimer = setTimeout(function() {
+        const tree = document.getElementById('ce-tree');
+        tree.innerHTML = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">⏳ mencari file…</div>';
+        fetch('/api/scan/' + SCAN_ID + '/tree?filter=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                const files = data.files || [];
+                if (!files.length) {
+                    tree.innerHTML = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">Tidak ada file cocok</div>';
+                    return;
+                }
+                let html = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)] text-[10px] cursor-default">filter: ' + files.length + ' file</div>';
+                files.forEach(function(f) {
+                    const sel = (f.path === CE.selectedFile) ? ' ce-sel' : '';
+                    html += '<div class="' + CE_NODE_FILE_CLS + sel + ' text-[11px]" data-file="' + escHtml(f.path) + '" title="' + escHtml(f.path) + '" onclick="ceOpenFile(\'' + escJs(f.path) + '\')">📄 ' + escHtml(f.path) + '</div>';
+                });
+                tree.innerHTML = html;
+            })
+            .catch(function() {
+                tree.innerHTML = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">❌ gagal memfilter</div>';
+            });
+    }, 300);
+}
+
+function ceToggleDir(path, el) {
+    CE.expanded[path] = !CE.expanded[path];
+    if (!el) return;
+    // caret = span pertama dalam node
+    const caret = el.querySelector('span');
+    if (caret) caret.innerText = CE.expanded[path] ? '▾' : '▸';
+    let sub = el.nextElementSibling;
+    if (!sub || !sub.classList.contains('ml-3')) {
+        sub = document.createElement('div');
+        sub.className = 'ml-3 border-l border-[var(--border)] pl-1';
+        el.after(sub);
+    }
+    if (!CE.expanded[path]) {
+        sub.innerHTML = '';
+        return;
+    }
+    if (CE.dirCache[path]) {
+        sub.innerHTML = ceDirHtml(CE.dirCache[path]);
+        return;
+    }
+    sub.innerHTML = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">⏳ memuat…</div>';
+    ceFetchDir(path).then(function(data) {
+        CE.dirCache[path] = data;
+        if (CE.expanded[path]) sub.innerHTML = ceDirHtml(data);
+    }).catch(function(err) {
+        sub.innerHTML = '<div class="' + CE_NODE_CLS + ' text-[var(--text-muted)]">❌ ' + escHtml(String(err)) + '</div>';
+    });
+}
+
+/* ---------- GREP ---------- */
+function ceDoSearch() {
+    const inp = document.getElementById('ce-q');
+    const status = document.getElementById('ce-status');
+    const q = (inp.value || '').trim();
+    if (!q || CE.busy) return;
+    CE.busy = true;
+    CE.query = q;
+    CE.regexOn = document.getElementById('ce-regex').checked;
+    CE.caseOn = document.getElementById('ce-case').checked;
+    const scope = document.getElementById('ce-scope').value;
+    const ext = document.getElementById('ce-ext').value;
+    if (status) status.innerText = '⏳ menggrep corpus...';
+    fetch('/api/scan/' + SCAN_ID + '/search?q=' + encodeURIComponent(q) +
+          '&regex=' + (CE.regexOn ? 1 : 0) + '&case=' + (CE.caseOn ? 1 : 0) +
+          '&scope=' + encodeURIComponent(scope) + '&ext=' + encodeURIComponent(ext))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            CE.busy = false;
+            if (data.detail || data.error) {
+                if (status) status.innerText = '❌ ' + (data.detail || data.error);
+                return;
+            }
+            CE.matches = data.matches || [];
+            CE.truncated = data.truncated;
+            ceRenderResults(data);
+            ceGrepModalOpen();  // popup hasil ala jadx-gui search
+            if (status) {
+                status.innerText = (CE.truncated ? '⚠️ dipotak ' : '') +
+                    (data.match_count || 0) + ' match · ' + (data.file_count || 0) + ' file · ' +
+                    ((data.elapsed_ms || 0) / 1000).toFixed(1) + 's · engine: ' + (data.engine || 'python');
+            }
+        })
+        .catch(function(err) {
+            CE.busy = false;
+            if (status) status.innerText = '❌ ' + err;
+        });
+}
+
+/* ---------- POPUP HASIL GREP (dialog ala jadx-gui search) ---------- */
+function ceGrepModalOpen() {
+    const m = document.getElementById('ce-grep-modal');
+    if (!m) return;
+    m.style.display = 'flex';
+    ceRenderResults();
+}
+
+function ceGrepModalCloseDirect() {
+    const m = document.getElementById('ce-grep-modal');
+    if (m) m.style.display = 'none';
+}
+
+function ceGrepModalClose(e) {
+    if (e) e.stopPropagation();
+    ceGrepModalCloseDirect();
+}
+
+function ceRenderResults(meta) {
+    const box = document.getElementById('ce-grep-results');
+    const cnt = document.getElementById('ce-res-count');
+    const resBtn = document.getElementById('ce-res-btn');
+    const qLabel = document.getElementById('ce-grep-q-label');
+    const gCount = document.getElementById('ce-grep-count');
+    const gMeta = document.getElementById('ce-grep-meta');
+    if (!box) return;
+
+    // tombol hasil di toolbar + header popup
+    if (meta) {
+        if (cnt) cnt.innerText = meta.match_count || 0;
+        if (resBtn) resBtn.classList.remove('hidden');
+        if (qLabel) qLabel.innerText = '"' + (meta.query || CE.query) + '"';
+        if (gCount) gCount.innerText = (meta.match_count || 0) + ' match · ' + (meta.file_count || 0) + ' file';
+        if (gMeta) {
+            gMeta.innerText = ((meta.elapsed_ms || 0) / 1000).toFixed(1) + 's · engine: ' + (meta.engine || 'python') +
+                (meta.truncated ? ' · ⚠️ dipotak' : '');
+        }
+    }
+
+    if (!CE.matches.length) {
+        box.innerHTML = '<div class="text-center text-[12px] text-[#858585] py-8 px-3">Tidak ada match untuk <b class="text-[#cccccc]">' + escHtml(CE.query) + '</b>.</div>';
+        return;
+    }
+
+    // group per file
+    const byFile = {};
+    CE.matches.forEach(function(m) {
+        (byFile[m.path] = byFile[m.path] || []).push(m);
+    });
+    const RES_ROW_CLS = 'block font-mono text-[11px] text-[#cccccc] px-3 py-1 ml-3 cursor-pointer border-l-2 border-transparent hover:bg-[#094771] hover:border-[#007acc] hover:text-white truncate transition-colors rounded-r';
+    let html = '';
+    Object.keys(byFile).forEach(function(fp) {
+        const ms = byFile[fp];
+        const dirName = fp.lastIndexOf('/') > 0 ? fp.substring(0, fp.lastIndexOf('/')) + '/' : '';
+        const fileName = fp.substring(fp.lastIndexOf('/') + 1);
+        html += '<div class="mb-1.5">';
+        if (dirName) {
+            html += '<div class="font-mono text-[10px] text-[#858585] px-3 truncate">📁 ' + escHtml(dirName) + '</div>';
+        }
+        html += '<div class="font-mono text-[11px] font-bold text-white px-3 py-0.5 truncate" title="' + escHtml(fp) + '">📄 ' + escHtml(fileName) +
+                ' <span class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 align-middle">' + ms.length + '</span></div>';
+        ms.slice(0, 10).forEach(function(m) {
+            // highlight query emas di dalam baris hasil (konsisten dengan viewer)
+            const lineHtml = ceWrapMatches(escHtml(m.line_text));
+            html += '<div class="' + RES_ROW_CLS + '" onclick="ceOpenFile(\'' + escJs(fp) + '\',' + m.line_no + ');ceGrepModalCloseDirect()">' +
+                    '<span class="inline-block min-w-[44px] text-right mr-2.5 text-[#858585]">' + m.line_no + '</span>' + lineHtml + '</div>';
+        });
+        if (ms.length > 10) {
+            html += '<div class="text-[10px] text-[#858585] px-4 py-0.5">+' + (ms.length - 10) + ' match lain (buka file untuk semua)</div>';
+        }
+        html += '</div>';
+    });
+    if (CE.truncated) {
+        html += '<div class="text-[10px] text-amber-400/90 px-3 py-1.5 border-t border-[#2b2b2b]">⚠️ Hasil dipotak 500 match — persempit scope/ext/keyword lalu cari lagi.</div>';
+    }
+    box.innerHTML = html;
+}
+
+/* ---------- VIEWER ---------- */
+function ceOpenFile(path, focusLine) {
+    if (!path) return;
+    // kalau tab belum ter-load, antre
+    if (!CE.loaded) { CE.pendingOpen = {file: path, line: focusLine || 0}; showTab(8); return; }
+    showTab(8);
+    CE.curFile = path;
+    CE.selectedFile = path;
+    CE.activeMatchIdx = 0;
+    const dot = path.lastIndexOf('.') > 0 ? path.substring(path.lastIndexOf('.')).toLowerCase() : '';
+    CE.lang = CE_LANG_MAP[dot] || null;
+    CE.hlCache = {};   // ganti file -> cache syntax baru
+    ceMarkSelected();
+    CE.focusLine = focusLine || 0;
+    CE.highlightQuery = CE.query || '';
+    // kalau baris fokus di luar halaman pertama, mulai dari sekitar baris itu
+    let offset = 0;
+    if (CE.focusLine > 400) offset = Math.max(0, CE.focusLine - 100);
+    ceFetchFile(path, offset);
+}
+
+function ceFetchFile(path, offset) {
+    const viewer = document.getElementById('ce-viewer');
+    if (!viewer) return;
+    viewer.innerHTML = '<div class="text-center text-[12px] text-[var(--text-muted)] py-8">⏳ Memuat <span class="font-mono">' + escHtml(path) + '</span>...</div>';
+    fetch('/api/scan/' + SCAN_ID + '/file?path=' + encodeURIComponent(path) + '&offset=' + (offset || 0))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.detail) { viewer.innerHTML = '<div class="text-center text-[12px] text-red-400/90 py-8">❌ ' + escHtml(data.detail) + '</div>'; return; }
+            if (CE.curFile !== path) return;  // user pindah file saat loading
+            if (CE.fileData && CE.fileData.path === path && offset > 0) {
+                // append page berikutnya
+                CE.fileData.lines = CE.fileData.lines.concat(data.lines);
+                CE.fileData.next_offset = data.next_offset;
+            } else {
+                CE.fileData = data;
+            }
+            ceRenderViewer();
+        })
+        .catch(function(err) { viewer.innerHTML = '<div class="text-center text-[12px] text-red-400/90 py-8">❌ ' + escHtml(String(err)) + '</div>'; });
+}
+
+/* Syntax highlighting ringan (warna mengikuti mockup: kw #ff7b72, str #a5d6ff,
+   cmt #8b949e italic, fn #d2a8ff, typ #7ee787, num #79c0ff).
+   Bekerja pada teks SUDAH di-escape; urutan prioritas: comment > string > keyword > number > typ > fn. */
+const CE_KW = 'public|private|protected|static|final|abstract|class|interface|enum|extends|implements|void|return|new|import|package|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|throws|this|super|null|true|false|const|val|var|fun|let|def|function|async|await|export|default|struct|impl|mut|use';
+const CE_SYNTAX_RE = new RegExp(
+    '(\\/\\/.*$|&lt;!--.*$|^[ \\t]*#.*$)' +                      // 1: comment
+    '|(&quot;.*?&quot;|&#39;.*?&#39;|"[^"]*")' +                // 2: string
+    '|\\b(' + CE_KW + ')\\b' +                                   // 3: keyword
+    '|\\b(0x[0-9a-fA-F]+|\\d+(?:\\.\\d+)?)\\b' +                 // 4: number
+    '|\\b([A-Z][A-Za-z0-9_]{2,})\\b' +                           // 5: typename (CamelCase)
+    '|([a-zA-Z_]\\w*)(?=\\()',                                  // 6: function call
+    'g');
+
+function ceSyntax(escaped) {
+    return escaped.replace(CE_SYNTAX_RE, function(m, cmt, str, kw, num, typ, fn) {
+        if (cmt !== undefined) return '<span class="ce-cmt">' + cmt + '</span>';
+        if (str !== undefined) return '<span class="ce-str">' + str + '</span>';
+        if (kw !== undefined) return '<span class="ce-kw">' + kw + '</span>';
+        if (num !== undefined) return '<span class="ce-num">' + num + '</span>';
+        if (typ !== undefined) return '<span class="ce-typ">' + typ + '</span>';
+        if (fn !== undefined) return '<span class="ce-fn">' + fn + '</span>';
+        return m;
+    });
+}
+
+// Peta ekstensi -> bahasa highlight.js (bundle common); null = fallback tokenizer
+const CE_LANG_MAP = {
+    '.java': 'java', '.kt': 'kotlin', '.js': 'javascript', '.ts': 'typescript',
+    '.jsx': 'javascript', '.tsx': 'typescript', '.json': 'json', '.xml': 'xml',
+    '.html': 'xml', '.htm': 'xml', '.py': 'python', '.c': 'c', '.h': 'c',
+    '.cpp': 'cpp', '.hpp': 'cpp', '.cc': 'cpp', '.cs': 'csharp',
+    '.m': 'objectivec', '.mm': 'objectivec', '.md': 'markdown',
+    '.yml': 'yaml', '.yaml': 'yaml', '.sh': 'bash', '.bash': 'bash',
+    '.sql': 'sql', '.rb': 'ruby', '.go': 'go', '.rs': 'rust', '.swift': 'swift',
+    '.ini': 'ini', '.toml': 'ini', '.properties': 'ini', '.gradle': 'ini',
+    '.php': 'php', '.css': 'css', '.scss': 'scss', '.plist': 'xml', '.smali': null
+};
+
+function ceColorLine(text, lineNo) {
+    // Syntax coloring satu baris (VS Code via hljs; fallback tokenizer regex).
+    // Cache per file+baris biar render ulang (focus/muat lagi) tetap instan.
+    const cache = CE.hlCache[CE.curFile] = CE.hlCache[CE.curFile] || {};
+    if (cache[lineNo] !== undefined) return cache[lineNo];
+    let html;
+    if (window.hljs && CE.lang && hljs.getLanguage(CE.lang)) {
+        try {
+            html = hljs.highlight(text, {language: CE.lang, ignoreIllegals: true}).value;
+        } catch (e) {
+            html = ceSyntax(escHtml(text));
+        }
+    } else {
+        html = ceSyntax(escHtml(text));
+    }
+    cache[lineNo] = html;
+    return html;
+}
+
+function ceWrapMatches(html) {
+    // Bungkus kemunculan query dengan span.ce-hit — hanya pada chunk TEKS di luar tag,
+    // supaya tidak merusak span syntax hljs.
+    // Saat popup find aktif: pakai state find (query/toggle sendiri), else pakai query grep toolbar.
+    const findMode = CE.find.open && CE.find.query;
+    const q = findMode ? CE.find.query : CE.highlightQuery;
+    if (!q) return html;
+    const regexOn = findMode ? CE.find.regexOn : CE.regexOn;
+    const caseOn = findMode ? CE.find.caseOn : CE.caseOn;
+    let re;
+    try {
+        re = new RegExp(regexOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), caseOn ? 'g' : 'gi');
+    } catch (e) { return html; }
+    const parts = html.split(/(<[^>]+>)/);
+    let out = '';
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part.startsWith('<')) { out += part; continue; }
+        out += part.replace(re, function(m) { return '<span class="ce-hit">' + m + '</span>'; });
+    }
+    return out;
+}
+
+/* ---------- POPUP FIND-IN-FILE (ala jadx-gui / VS Code Ctrl+F) ---------- */
+function ceFindOpen() {
+    const f = document.getElementById('ce-find');
+    if (!f) return;
+    f.style.display = 'flex';
+    CE.find.open = true;
+    const inp = document.getElementById('ce-find-q');
+    if (inp) { inp.focus(); inp.select(); }
+    ceFindCompute();
+}
+
+function ceFindClose() {
+    const f = document.getElementById('ce-find');
+    if (f) f.style.display = 'none';
+    if (!CE.find.open) return;
+    CE.find.open = false;
+    const inp = document.getElementById('ce-find-q');
+    if (inp) inp.value = '';
+    CE.find.query = '';
+    CE.find.idx = 0;
+    CE.find.count = 0;
+    ceRenderViewer();  // kembali ke highlight grep toolbar (jika ada)
+}
+
+function ceFindToggle(kind) {
+    const key = kind === 'case' ? 'caseOn' : 'regexOn';
+    CE.find[key] = !CE.find[key];
+    const btn = document.getElementById(kind === 'case' ? 'ce-find-case' : 'ce-find-regex');
+    if (btn) btn.classList.toggle('ce-find-on', CE.find[key]);
+    ceFindCompute();
+}
+
+function ceFindOnInput(v) {
+    clearTimeout(CE.find.timer);
+    CE.find.timer = setTimeout(function() {
+        CE.find.query = (v || '').trim();
+        CE.find.idx = 0;
+        ceFindCompute();
+    }, 150);
+}
+
+function ceFindCompute() {
+    if (!CE.find.open || !CE.find.query) {
+        const cnt = document.getElementById('ce-find-count');
+        if (cnt) cnt.innerText = '0/0';
+        CE.find.count = 0;
+        CE.find.idx = 0;
+        if (CE.find.open) ceRenderViewer();  // clear find highlight
+        return;
+    }
+    ceRenderViewer();
+    ceFindMark(true);
+}
+
+function ceFindMark(scroll) {
+    const hits = document.querySelectorAll('#ce-viewer .ce-hit');
+    CE.find.count = hits.length;
+    if (!CE.find.count) {
+        const cnt = document.getElementById('ce-find-count');
+        if (cnt) cnt.innerText = '0/0';
+        return;
+    }
+    if (CE.find.idx >= CE.find.count) CE.find.idx = 0;
+    hits.forEach(function(h, i) { h.classList.toggle('ce-hit-cur', i === CE.find.idx); });
+    const cur = hits[CE.find.idx];
+    if (cur && scroll) cur.scrollIntoView({block: 'center'});
+    const cnt = document.getElementById('ce-find-count');
+    if (cnt) cnt.innerText = (CE.find.idx + 1) + '/' + CE.find.count;
+}
+
+function ceFindNav(step) {
+    if (!CE.find.count) return;
+    CE.find.idx = (CE.find.idx + step + CE.find.count) % CE.find.count;
+    const hits = document.querySelectorAll('#ce-viewer .ce-hit');
+    hits.forEach(function(h, i) { h.classList.toggle('ce-hit-cur', i === CE.find.idx); });
+    hits[CE.find.idx].scrollIntoView({block: 'center', behavior: 'smooth'});
+    const cnt = document.getElementById('ce-find-count');
+    if (cnt) cnt.innerText = (CE.find.idx + 1) + '/' + CE.find.count;
+}
+
+function ceRenderViewer() {
+    const data = CE.fileData;
+    if (!data) return;
+    const viewer = document.getElementById('ce-viewer');
+    const head = document.getElementById('ce-viewer-head');
+    const foot = document.getElementById('ce-viewer-foot');
+    if (!viewer) return;
+
+    const ext = (data.path.substring(data.path.lastIndexOf('.')) || '').toLowerCase();
+    if (head) {
+        head.innerHTML =
+            '<span class="font-mono text-[11px] text-white truncate max-w-[45%]" title="' + escHtml(data.path) + '">' + escHtml(data.path) + '</span>' +
+            (ext ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#264f78] text-[#9cdcfe]">' + escHtml(ext) + '</span>' : '') +
+            '<span class="text-[#858585]">' + (data.size / 1024).toFixed(1) + ' KB · ' + data.total_lines.toLocaleString('id') + ' baris</span>' +
+            '<span class="ml-auto flex gap-1.5">' +
+            '<button class="px-2 py-1 rounded border border-[#3c3c3c] text-[10px] text-[#cccccc] bg-transparent cursor-pointer hover:bg-[#2a2d2e] hover:text-white transition-colors" onclick="ceFindOpen()" title="Cari di file ini (Ctrl+F)">🔍 Cari</button>' +
+            '<button class="px-2 py-1 rounded border border-[#3c3c3c] text-[10px] text-[#cccccc] bg-transparent cursor-pointer hover:bg-[#2a2d2e] hover:text-white transition-colors" onclick="ceCopyPath()" title="Copy path">📋 Copy</button>' +
+            '<button class="px-2 py-1 rounded border border-purple-400/40 text-[10px] font-bold text-purple-300 bg-purple-500/10 cursor-pointer hover:bg-purple-500/25 transition-colors" onclick="ceAskAI()">🤖 Tanya AI</button>' +
+            '</span>';
+    }
+
+    let html = '';
+    data.lines.forEach(function(l) {
+        const isFocus = CE.focusLine && l.no === CE.focusLine;
+        html += '<div class="ce-line flex items-start' + (isFocus ? ' ce-focus' : '') + '" id="ce-l-' + l.no + '" data-no="' + l.no + '">' +
+                '<span class="w-[52px] shrink-0 text-right pr-3 pl-2 select-none text-[#858585] hover:text-[#c6c6c6] text-[12px] leading-[1.55] border-r border-[#2b2b2b]">' + l.no + '</span>' +
+                '<span class="ce-code-cell flex-1 pl-3 whitespace-pre-wrap break-all">' + ceWrapMatches(ceColorLine(l.text, l.no)) + '</span>' +
+                '</div>';
+    });
+    if (data.next_offset !== null && data.next_offset !== undefined) {
+        html += '<div class="text-center py-2.5"><button class="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] bg-[var(--bg-secondary)] cursor-pointer hover:text-purple-300 hover:border-purple-400/50 transition-colors" onclick="ceFetchFile(\'' + escJs(data.path) + '\',' + data.next_offset + ')">⬇ Muat ' + data.total_lines.toLocaleString('id') + ' baris… (dari baris ' + (data.next_offset + 1) + ')</button></div>';
+    }
+    viewer.innerHTML = html;
+
+    // scroll ke baris fokus
+    if (CE.focusLine) {
+        const el = document.getElementById('ce-l-' + CE.focusLine);
+        if (el) el.scrollIntoView({block: 'center'});
+        else { viewer.scrollTop = 0; }
+    } else {
+        viewer.scrollTop = 0;
+    }
+
+    // footer: jumlah match di file ini + match aktif (mirip mockup)
+    if (foot) {
+        const inFile = CE.matches.filter(function(m) { return m.path === data.path; }).length;
+        const hits = document.querySelectorAll('#ce-viewer .ce-hit');
+        if (hits.length) {
+            foot.innerHTML = '🎯 ' + hits.length + ' match di file ini · match aktif: <b class="ce-active-idx">' +
+                (CE.activeMatchIdx + 1) + '/' + hits.length + '</b> · ⏎ Enter = berikutnya · Ctrl+F = cari di file';
+        } else if (inFile) {
+            foot.innerHTML = '🎯 ' + inFile + ' match (di luar halaman ter-load) · ⬇ muat lagi';
+        } else if (data.next_offset !== null && data.next_offset !== undefined) {
+            foot.innerHTML = 'File panjang — ⬇ muat lagi untuk baris berikutnya · Ctrl+F = cari di file';
+        } else {
+            foot.innerHTML = '— Ctrl+F = cari di file ini';
+        }
+    }
+
+    // re-mark posisi find popup setelah render ulang (muat lagi / navigasi)
+    if (CE.find.open && CE.find.query) ceFindMark(false);
+}
+
+function ceNextMatch() {
+    if (!CE.fileData) return;
+    // match berikutnya = baris dengan .ce-hit setelah baris fokus saat ini
+    const rows = document.querySelectorAll('#ce-viewer .ce-line');
+    if (!rows.length) return;
+    const cur = CE.focusLine || 0;
+    let next = null;
+    rows.forEach(function(tr) {
+        const no = parseInt(tr.dataset.no);
+        if (!next && no > cur && tr.querySelector('.ce-hit')) next = no;
+    });
+    if (next === null) {
+        // wrap ke awal file
+        rows.forEach(function(tr) {
+            const no = parseInt(tr.dataset.no);
+            if (next === null && tr.querySelector('.ce-hit')) next = no;
+        });
+        CE.activeMatchIdx = 0;  // wrap -> reset counter
+    } else {
+        CE.activeMatchIdx++;
+    }
+    if (next !== null) {
+        CE.focusLine = next;
+        const el = document.getElementById('ce-l-' + next);
+        if (el) {
+            document.querySelectorAll('#ce-viewer .ce-focus').forEach(function(t) { t.classList.remove('ce-focus'); });
+            el.classList.add('ce-focus');
+            el.scrollIntoView({block: 'center', behavior: 'smooth'});
+        }
+        // update counter footer
+        const hits = document.querySelectorAll('#ce-viewer .ce-hit');
+        const idxEl = document.querySelector('#ce-viewer-foot .ce-active-idx');
+        if (idxEl) idxEl.innerText = (CE.activeMatchIdx % Math.max(1, hits.length)) + 1 + '/' + hits.length;
+    }
+}
+
+function ceCopyPath() {
+    if (CE.fileData && navigator.clipboard) {
+        navigator.clipboard.writeText(CE.fileData.path).catch(function() {});
+    }
+}
+
+function ceAskAI() {
+    if (!CE.fileData) return;
+    // kumpulkan snippet ±20 baris sekitar baris fokus / awal file
+    const lines = CE.fileData.lines;
+    const idx = CE.focusLine ? lines.findIndex(function(l) { return l.no === CE.focusLine; }) : 0;
+    const start = Math.max(0, (idx >= 0 ? idx : 0) - 10);
+    const snippet = lines.slice(start, start + 25).map(function(l) { return l.text; }).join('\n');
+    const msg = 'Analisis snippet ini dari file corpus "' + CE.fileData.path + '" (sekitar baris ' +
+        (CE.focusLine || (start + 1)) + '):\n\n```\n' + snippet + '\n```\n\n' +
+        'Jelaskan apa yang dilakukan kode ini, potensi vulnerability / kebocoran yang relevan, ' +
+        'dan langkah verifikasi aman berikutnya.';
+    const inp = document.getElementById('chat-input');
+    if (inp) {
+        inp.value = msg;
+        // buka side panel AI lalu kirim
+        if (!document.body.classList.contains('chat-open')) toggleAssistant();
+        sendAssistantMessage();
+    }
+}
+
+// Entry point global: buka file corpus dari tab lain (mis. tombol di Secrets)
+function openInCodeExplorer(file, line) {
+    if (!file) return;
+    CE.pendingOpen = {file: file, line: line || 0};
+    showTab(8);
+    if (CE.loaded) {
+        const p = CE.pendingOpen;
+        CE.pendingOpen = null;
+        ceOpenFile(p.file, p.line);
+    }
+}
+
+// Enter di luar input grep (saat viewer aktif) = next match
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target && (e.target.tagName === 'BODY' || e.target.id === 'tab-8-data') &&
+        document.getElementById('tab-8-content') && document.getElementById('tab-8-content').classList.contains('active')) {
+        ceNextMatch();
+    }
+});
+
+// Ctrl+F (saat tab Code Explorer aktif) = buka popup find-in-file ala jadx; F3 = next
+document.addEventListener('keydown', function(e) {
+    const tab8 = document.getElementById('tab-8-content');
+    if (!tab8 || !tab8.classList.contains('active')) return;
+    if (e.key === 'Escape') {
+        // tutup popup hasil grep (find popup handle Esc-nya sendiri via input)
+        const m = document.getElementById('ce-grep-modal');
+        if (m && m.style.display !== 'none') ceGrepModalCloseDirect();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        ceFindOpen();
+    } else if (e.key === 'F3' && CE.find.open) {
+        e.preventDefault();
+        ceFindNav(e.shiftKey ? -1 : 1);
+    }
+});
 
 function openFridaModalDirect() {
     fetch('/api/scan/' + SCAN_ID + '/frida-script')

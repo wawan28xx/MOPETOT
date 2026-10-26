@@ -138,6 +138,19 @@ async def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_scans_status_created
             ON scans(status, created_at, id);
+
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id INTEGER NOT NULL,
+                secret_id INTEGER,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_history_scan_secret
+            ON chat_history(scan_id, secret_id);>>>>>>> 23e02dc (feat: AI chatbox (vibe CLI), Code Explorer, FairPlay cryptid detection, PII rules cleanup)
         """)
         await db.commit()
         try:
@@ -455,3 +468,49 @@ async def get_poc_cache(db, scan_id):
         (scan_id,),
     )
     return await cursor.fetchone()
+
+
+async def insert_chat_message(db, scan_id, secret_id, role, content):
+    await db.execute(
+        "INSERT INTO chat_history (scan_id, secret_id, role, content) VALUES (?, ?, ?, ?)",
+        (scan_id, secret_id, role, content)
+    )
+    await db.commit()
+
+
+async def get_chat_history(db, scan_id, secret_id=None):
+    if secret_id:
+        cursor = await db.execute(
+            """
+            SELECT id, role, content, created_at
+            FROM chat_history
+            WHERE scan_id=? AND secret_id=?
+            ORDER BY id ASC
+            """,
+            (scan_id, secret_id),
+        )
+    else:
+        cursor = await db.execute(
+            """
+            SELECT id, role, content, created_at
+            FROM chat_history
+            WHERE scan_id=? AND secret_id IS NULL
+            ORDER BY id ASC
+            """,
+            (scan_id,),
+        )
+    return await cursor.fetchall()
+
+
+async def clear_chat_history(db, scan_id, secret_id=None):
+    if secret_id:
+        await db.execute(
+            "DELETE FROM chat_history WHERE scan_id=? AND secret_id=?",
+            (scan_id, secret_id),
+        )
+    else:
+        await db.execute(
+            "DELETE FROM chat_history WHERE scan_id=? AND secret_id IS NULL",
+            (scan_id,),
+        )
+    await db.commit()

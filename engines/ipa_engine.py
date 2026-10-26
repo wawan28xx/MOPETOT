@@ -1,4 +1,5 @@
 """Ekstraksi IPA (iOS): Payload/*.app — Mach-O utama, dylibs, framework, plist."""
+import json
 import zipfile
 from pathlib import Path
 
@@ -102,10 +103,11 @@ def unpack_ipa(target: Path, workdir: Path, opts: dict):
     if not app_dir:
         app_dir = root
 
-    # Mach-O utama (file executable di root .app tanpa ekstensi)
+    # Mach-O utama (file executable di root .app tanpa ekstensi yang BENAR-BENAR
+    # Mach-O — jangan menerima PkgInfo dsb. yang kebetulan tanpa ekstensi)
     main_bin = None
     for f in sorted(app_dir.iterdir()):
-        if f.is_file() and f.suffix == "" and f.name not in ("embedded.mobileprovision",):
+        if f.is_file() and f.suffix == "" and f.name not in ("embedded.mobileprovision",) and _is_macho(f):
             main_bin = f
             break
     if main_bin:
@@ -124,6 +126,9 @@ def unpack_ipa(target: Path, workdir: Path, opts: dict):
         # Ekstrak simbol class untuk dynamic framework biner
         if b.suffix == ".dylib" or "framework" in str(b).lower():
             extract_objc_swift_symbols(b, corpus)
+
+    # Deteksi FairPlay encryption (cryptid) pada semua biner Mach-O
+    analyze_ipa_encryption(app_dir, corpus, [b for b in seen if b])
 
     # Plist -> XML. Nama unik per path relatif supaya Info.plist antar-bundle
     # tidak saling menimpa; Info.plist utama app disimpan tetap sebagai
@@ -165,3 +170,128 @@ def _is_macho(path: Path):
     except OSError:
         return False
     return head in (b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe")
+
+
+# ------------------ FairPlay encryption (cryptid) detection ------------------
+
+import struct
+
+# Magic Mach-O
+MH_MAGIC_64 = 0xFEEDFACF
+MH_MAGIC = 0xFEEDFACE
+FAT_MAGIC_BE = 0xCAFEBABE  # fat/universal (big-endian)
+
+# Load command
+LC_ENCRYPTION_INFO = 0x21      # 32-bit
+LC_ENCRYPTION_INFO_64 = 0x2C   # 64-bit
+
+_CPU_TYPES = {
+    12: "arm", 0x0100000C: "arm64",
+    7: "x86", 0x01000007: "x86_64",
+    5: "powerpc", 0x01000012: "ppc64",
+}
+
+
+def _parse_mach_slice(data: bytes, offset: int) -> dict:
+    """Parse satu slice Mach-O -> {ncmds, cryptid, cryptoff, cryptsize} atau None."""
+    if offset + 32 > len(data):
+        return None
+    # Magic bisa little- atau big-endian tergantung platform
+    magic_le = struct.unpack_from("<I", data, offset)[0]
+    magic_be = struct.unpack_from(">I", data, offset)[0]
+    little = None
+    if magic_le in (MH_MAGIC_64, MH_MAGIC):
+        little = True
+    elif magic_be in (MH_MAGIC_64, MH_MAGIC):
+        little = False
+    else:
+        return None
+    endianness = "<" if little else ">"
+    # mach_header{32}: magic, cputype, cpusubtype, filetype, ncmds, sizeofcmds, flags
+    # (+reserved utk 64-bit) — layout sama hingga ncmds
+    cputype = struct.unpack_from(endianness + "I", data, offset + 4)[0]
+    ncmds = struct.unpack_from(endianness + "I", data, offset + 16)[0]
+    is64 = (magic_le if little else magic_be) == MH_MAGIC_64
+    cursor = offset + 32 if is64 else offset + 28  # header 64-bit punya reserved
+    result = {"cryptid": 0, "cryptoff": 0, "cryptsize": 0, "arch": _CPU_TYPES.get(cputype, f"cpu:{cputype}"), "ncmds": ncmds}
+    for _ in range(ncmds):
+        if cursor + 8 > len(data):
+            break
+        cmd, cmdsize = struct.unpack_from(endianness + "II", data, cursor)
+        if cmd in (LC_ENCRYPTION_INFO, LC_ENCRYPTION_INFO_64):
+            # encryption_info: cmd, cmdsize, cryptoff, cryptsize, cryptid
+            if cursor + 20 <= len(data):
+                cryptoff, cryptsize, cryptid = struct.unpack_from(endianness + "III", data, cursor + 8)
+                if cryptid:
+                    result.update({"cryptid": cryptid, "cryptoff": cryptoff, "cryptsize": cryptsize})
+        cursor += cmdsize
+        if cmdsize == 0:
+            break
+    return result
+
+
+def check_macho_encryption(path: Path) -> list:
+    """Deteksi FairPlay encryption (cryptid) per-slice Mach-O. Pure Python, tanpa dep baru.
+
+    Return list[{arch, cryptid, cryptoff, cryptsize, encrypted}].
+    Fat/universal binary menghasilkan >1 entry.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return []
+    slices = []
+    fat_magic = struct.unpack_from(">I", data, 0)[0]
+    if fat_magic == FAT_MAGIC_BE:
+        # universal binary: nfat_arch, lalu {cputype, cpusubtype, offset, size, align}
+        nfat = struct.unpack_from(">I", data, 4)[0]
+        for i in range(min(nfat, 16)):
+            base = 8 + i * 20
+            if base + 20 > len(data):
+                break
+            cputype, _, off, size, _ = struct.unpack_from(">IIIII", data, base)
+            slices.append((off, _CPU_TYPES.get(cputype, f"cpu:{cputype}")))
+    else:
+        slices.append((0, None))
+
+    results = []
+    for off, forced_arch in slices:
+        info = _parse_mach_slice(data, off)
+        if not info:
+            continue
+        if forced_arch:
+            info["arch"] = forced_arch
+        info["encrypted"] = bool(info.get("cryptid"))
+        results.append(info)
+    return results
+
+
+def analyze_ipa_encryption(app_dir: Path, corpus: Path, binaries: list):
+    """Cek semua binary Mach-O dalam .app; hasil disimpan ke corpus/ios_crypto.json."""
+    report = {"binaries": [], "any_encrypted": False}
+    for b in binaries:
+        if not b or not Path(b).exists():
+            continue
+        slices = check_macho_encryption(Path(b))
+        if not slices:
+            continue
+        rel = str(b.relative_to(app_dir)) if b.is_relative_to(app_dir) else b.name
+        for s in slices:
+            entry = {
+                "file": rel, "arch": s["arch"],
+                "cryptid": s["cryptid"], "cryptoff": s["cryptoff"], "cryptsize": s["cryptsize"],
+                "encrypted": s["encrypted"],
+            }
+            report["binaries"].append(entry)
+            if s["encrypted"]:
+                report["any_encrypted"] = True
+                log(f"🔒 FairPlay ENCRYPTED: {rel} [{s['arch']}] cryptid={s['cryptid']} "
+                    f"(offset {s['cryptoff']:#x}, size {s['cryptsize']}) — strings/symbols TIDAK lengkap, "
+                    f"butuh dump decrypted dari device jailbroken", "warn")
+            else:
+                log(f"cryptid=0 OK: {rel} [{s['arch']}] binary tidak terenkripsi", "ok")
+    try:
+        (corpus / "ios_crypto.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return report

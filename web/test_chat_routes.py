@@ -1,0 +1,17 @@
+"""Import check app.py (validasi FastAPI routes) tanpa start server."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import app  # noqa: F401
+
+routes = sorted(r.path for r in app.app.routes if "chat" in getattr(r, "path", ""))
+# /chat/history punya 2 entri (GET + DELETE)
+assert routes == [
+    "/api/scan/{scan_id}/chat",
+    "/api/scan/{scan_id}/chat/config",
+    "/api/scan/{scan_id}/chat/history",
+    "/api/scan/{scan_id}/chat/history",
+], routes
+print("app import OK, chat routes:", routes)

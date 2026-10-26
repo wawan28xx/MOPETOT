@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Design Mockup — Code Explorer | Mobile Audit Tool</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { corePlugins: { preflight: false } };</script>
+<style>
+    body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; margin: 0; }
+    .code { font-family: Consolas, 'Courier New', monospace; font-size: 12.5px; line-height: 1.6; }
+    .tab { padding: 8px 16px; font-size: 13px; font-weight: 600; color: #8b949e; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.active { color: #c084fc; border-bottom-color: #a855f7; background: rgba(168,85,247,0.06); }
+    .tnode { padding: 3px 8px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .tnode:hover { background: rgba(168,85,247,0.12); }
+    .tnode.sel { background: rgba(168,85,247,0.25); color: #e9d5ff; }
+    .badge { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+    .ln { color: #484f58; min-width: 38px; display: inline-block; text-align: right; margin-right: 12px; user-select: none; }
+    .hit { background: rgba(245,158,11,0.25); outline: 1px solid rgba(245,158,11,0.5); border-radius: 3px; padding: 0 2px; }
+    .kw { color: #ff7b72; } .str { color: #a5d6ff; } .cmt { color: #8b949e; font-style: italic; } .fn { color: #d2a8ff; } .typ { color: #7ee787; }
+    .res-row { padding: 6px 10px; border-left: 2px solid transparent; cursor: pointer; font-size: 12px; }
+    .res-row:hover { background: rgba(168,85,247,0.1); border-left-color: #a855f7; }
+</style>
+</head>
+<body class="pb-10">
+
+<!-- ===== NAVBAR SIMULASI ===== -->
+<nav class="flex items-center gap-6 px-6 h-[52px] border-b border-gray-700 bg-[#161b22] text-sm">
+    <span class="font-bold text-purple-400">☠ Mobile Audit Tool</span>
+    <span class="text-gray-400">Dashboard</span><span class="text-gray-400">Upload</span>
+    <span class="text-gray-400">History</span><span class="text-gray-400">Compare</span>
+    <input class="ml-auto bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-300 w-56" placeholder="Search findings..." disabled>
+</nav>
+
+<!-- ===== SCAN HEADER ===== -->
+<div class="px-6 pt-4 pb-2 flex items-center gap-3">
+    <h1 class="text-lg font-bold">com.stockbit.android <span class="text-xs text-gray-500 font-normal">v3.22.11 (APK · fast mode)</span></h1>
+    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/40">COMPLETED</span>
+</div>
+
+<!-- ===== TABS ===== -->
+<div class="flex px-6 border-b border-gray-700 bg-[#161b22]">
+    <div class="tab">📊 Overview</div>
+    <div class="tab">📱 Components &amp; IPC</div>
+    <div class="tab">🔑 Secrets &amp; Keys <span class="text-[10px] font-bold px-1.5 rounded bg-purple-500/20 text-purple-300">17</span></div>
+    <div class="tab">🌐 Network &amp; IPs</div>
+    <div class="tab">🛡️ Vuln Findings</div>
+    <div class="tab">⚡ Live Verifier</div>
+    <div class="tab active">🔍 Code Explorer</div>
+    <div class="tab">📜 Logs</div>
+</div>
+
+<!-- ===== CODE EXPLORER ===== -->
+<div class="flex border-b border-gray-700 bg-[#12161c] px-6 py-2.5 gap-3 items-center flex-wrap">
+    <!-- Search bar -->
+    <div class="flex items-center gap-2 flex-1 min-w-[320px] max-w-xl">
+        <span class="text-sm">🔍</span>
+        <input id="q" class="code flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-1.5 text-gray-200 focus:outline-none focus:border-purple-400"
+               placeholder="grep corpus... (regex didukung)" value="api\.stockbit\.com">
+        <label class="flex items-center gap-1 text-[11px] text-gray-400"><input type="checkbox" checked> regex</label>
+        <label class="flex items-center gap-1 text-[11px] text-gray-400"><input type="checkbox" checked> Aa</label>
+        <button onclick="alert('DEMO: panggil GET /api/scan/{id}/search')" class="px-4 py-1.5 rounded-lg text-[12px] font-bold text-white bg-gradient-to-r from-purple-500 to-indigo-600">Cari</button>
+    </div>
+    <!-- Scope + type filter -->
+    <select class="bg-[#0d1117] border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300">
+        <option>Seluruh corpus (12.431 file teks)</option>
+        <option>sources_java (jadx)</option>
+        <option>sources_smali</option>
+        <option>assets</option>
+        <option>decoded (apktool)</option>
+    </select>
+    <select class="bg-[#0d1117] border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-gray-300">
+        <option>semua tipe file</option><option>.java</option><option>.smali</option><option>.js</option><option>.json/.xml</option>
+    </select>
+    <span class="ml-auto text-[11px] text-gray-500">🟢 100% offline · grep lokal di corpus scan</span>
+</div>
+
+<!-- ===== 3 PANEL ===== -->
+<div class="flex" style="height: 560px;">
+
+    <!-- PANEL 1: FILE TREE -->
+    <div class="w-[230px] shrink-0 border-r border-gray-700 bg-[#0d1117] flex flex-col">
+        <div class="px-3 py-2 border-b border-gray-800">
+            <input class="w-full bg-[#161b22] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300" placeholder="filter file...">
+        </div>
+        <div class="overflow-y-auto flex-1 p-1.5" id="tree">
+            <div class="tnode text-gray-400">📁 <b>corpus/</b></div>
+            <div class="tnode text-gray-400">📁 assets</div>
+            <div class="tnode text-gray-400">📁 decoded (apktool)</div>
+            <div class="tnode text-gray-400">📁 res (values)</div>
+            <div class="tnode text-gray-400">📁 sources_java (jadx)<span class="badge bg-blue-500/20 text-blue-300">8.2k</span></div>
+            <div class="tnode tnode-file sel" onclick="pickFile(0)" data-f="0">📁 sources_java/com/stockbit/api</div>
+            <div class="tnode code pl-6" onclick="pickFile(0)" data-f="0">📄 ApiClient.java</div>
+            <div class="tnode code pl-6" onclick="pickFile(1)" data-f="1">📄 EndpointConfig.java</div>
+            <div class="tnode code pl-6" onclick="pickFile(2)" data-f="2">📄 AuthInterceptor.java</div>
+            <div class="tnode text-gray-400">📁 sources_smali<span class="badge bg-amber-500/20 text-amber-300">skip</span></div>
+            <div class="tnode text-gray-400">📁 strings_native (rabin2)</div>
+            <div class="tnode text-gray-400">📄 google-services.json</div>
+        </div>
+        <div class="px-3 py-2 border-t border-gray-800 text-[10px] text-gray-500">
+            12.431 file teks · 96 MB corpus
+        </div>
+    </div>
+
+    <!-- PANEL 2: SEARCH RESULTS -->
+    <div class="w-[300px] shrink-0 border-r border-gray-700 bg-[#12161c] flex flex-col">
+        <div class="px-3 py-2 border-b border-gray-800 text-[11px] text-gray-400 flex items-center gap-2">
+            <b class="text-gray-200">Hasil grep</b>
+            <span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold" id="cnt">7 match</span>
+            <span class="ml-auto text-gray-500">0.8s</span>
+        </div>
+        <div class="overflow-y-auto flex-1" id="results">
+            <div class="res-row" onclick="openHit(0,870)">
+                <div class="code text-gray-400 truncate">📁 sources_java/com/stockbit/api/</div>
+                <div class="code text-purple-300 font-bold truncate">ApiClient.java</div>
+                <div class="code text-gray-300 truncate"><span class="ln">870</span>BASE_URL = "<span class="hit">https://api.stockbit.com/</span>";</div>
+            </div>
+            <div class="res-row" onclick="openHit(1,1203)">
+                <div class="code text-gray-400 truncate">📁 sources_java/com/stockbit/api/</div>
+                <div class="code text-purple-300 font-bold truncate">EndpointConfig.java</div>
+                <div class="code text-gray-300 truncate"><span class="ln">1203</span>String host = "<span class="hit">api.stockbit.com</span>";</div>
+            </div>
+            <div class="res-row" onclick="openHit(2,45)">
+                <div class="code text-gray-400 truncate">📁 sources_java/com/stockbit/api/</div>
+                <div class="code text-purple-300 font-bold truncate">AuthInterceptor.java</div>
+                <div class="code text-gray-300 truncate"><span class="ln">45</span>url.contains("<span class="hit">api.stockbit.com</span>") ?</div>
+            </div>
+            <div class="res-row opacity-60">
+                <div class="code text-gray-500 truncate">📁 assets/www/js/ +4 file lain</div>
+            </div>
+        </div>
+        <div class="px-3 py-2 border-t border-gray-800 text-[10px] text-gray-500">
+            ⏎ Enter = match berikutnya · klik = buka file &amp; scroll ke baris
+        </div>
+    </div>
+
+    <!-- PANEL 3: CODE VIEWER -->
+    <div class="flex-1 bg-[#0d1117] flex flex-col min-w-0">
+        <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-2 text-[11px]">
+            <span class="code text-gray-300 truncate" id="viewer-path">sources_java/com/stockbit/api/ApiClient.java</span>
+            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">.java</span>
+            <span class="text-gray-500">3,2 KB · 412 baris</span>
+            <button class="ml-auto text-[10px] px-2 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-purple-300">📋 Copy</button>
+            <button class="text-[10px] px-2 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-purple-300">🤖 Tanya AI</button>
+        </div>
+        <div class="overflow-auto flex-1 p-3">
+<pre class="code" id="viewer"><span class="ln">866</span><span class="cmt">// Konfigurasi API client (hasil decompile jadx)</span>
+<span class="ln">867</span><span class="kw">public final class</span> <span class="typ">ApiClient</span> {
+<span class="ln">868</span>
+<span class="ln">869</span>    <span class="cmt">// Endpoint production</span>
+<span class="ln">870</span>    <span class="kw">private static final</span> <span class="typ">String</span> BASE_URL = <span class="str">"https://<span class="hit">api.stockbit.com</span>/"</span>;
+<span class="ln">871</span>    <span class="kw">private static final</span> <span class="typ">String</span> STAGING_URL = <span class="str">"https://stg-api.stockbit.dev/"</span>;
+<span class="ln">872</span>
+<span class="ln">873</span>    <span class="kw">public</span> <span class="typ">OkHttpClient</span> <span class="fn">build</span>(<span class="typ">String</span> token) {
+<span class="ln">874</span>        <span class="kw">return new</span> <span class="typ">OkHttpClient</span>.<span class="fn">Builder</span>()
+<span class="ln">875</span>            .addInterceptor(<span class="kw">new</span> <span class="typ">AuthInterceptor</span>(token))
+<span class="ln">876</span>            .certificatePinner(<span class="typ">SecurityPins</span>.<span class="fn">prod</span>())   <span class="cmt">// ⚠ SSL pinning aktif</span>
+<span class="ln">877</span>            .build();
+<span class="ln">878</span>    }
+<span class="ln">879</span>}</pre>
+        </div>
+        <div class="px-4 py-2 border-t border-gray-800 text-[10px] text-gray-500 flex gap-4">
+            <span>3 match di file ini · match aktif: <b class="text-amber-400">1/3</b></span>
+            <span class="ml-auto">⚠ File &gt;64 KB tampil terpotak — muat lebih via tombol</span>
+        </div>
+    </div>
+</div>
+
+<!-- ===== FLOW NOTES ===== -->
+<div class="px-6 mt-6 text-[12px] text-gray-400 leading-relaxed max-w-4xl">
+    <b class="text-gray-200">Catatan desain:</b>
+    ① Tab Secrets/Findings → klik temuan bisa langsung <b>buka file ini di Code Explorer</b> (ngganti modal ±5 baris yang sekarang).
+    ② Tombol <b>🤖 Tanya AI</b> di viewer → kirim snippet + file ke Verification Assistant (context auto-attach).
+    ③ Grep jalan di threadpool Python — corpus besar di-protect dengan limit 500 match + filter scope.
+</div>
+
+<script>
+const FILES = {
+  0: ['sources_java/com/stockbit/api/ApiClient.java', '870'],
+  1: ['sources_java/com/stockbit/api/EndpointConfig.java', '1203'],
+  2: ['sources_java/com/stockbit/api/AuthInterceptor.java', '45'],
+};
+function pickFile(i) {
+    document.querySelectorAll('.tnode').forEach(t => t.classList.remove('sel'));
+    const el = document.querySelector('.tnode[data-f="' + i + '"]');
+    if (el) el.classList.add('sel');
+    document.getElementById('viewer-path').textContent = FILES[i][0];
+}
+function openHit(i, line) { pickFile(i); alert('DEMO: scroll viewer ke baris ' + line + ' + highlight match'); }
+</script>
+</body>
+</html>

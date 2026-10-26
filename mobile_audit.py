@@ -42,12 +42,21 @@ from engines import manifest_analyzer, endpoint_analyzer
 
 BASE = Path(__file__).resolve().parent
 
+# Tipe file teks (report/PoC markdown, note, config) yang discan apa adanya
+# tanpa ekstraksi strings lossy — memungkinkan mobile_audit membaca file
+# seperti BOX_ANDROID_FINDINGS_POC.md dan menangkap secret di dalamnya.
+TEXT_EXTS = {".md", ".markdown", ".txt", ".log", ".csv", ".tsv", ".json", ".xml",
+             ".yaml", ".yml", ".ini", ".conf", ".cfg", ".config", ".properties",
+             ".toml", ".env"}
+
 
 def classify(target: Path):
     ext = target.suffix.lower()
     if target.is_dir():
         ct, fw = detect_framework(target)
         return "dir", fw
+    if ext in TEXT_EXTS:
+        return "text", None
     kind, _ = sniff_file(target)
     if ext in (".apk",):
         return "apk", None
@@ -65,7 +74,7 @@ def classify(target: Path):
         return "pe", None
     if ext in (".hbc",) or kind == "hbc":
         return "hbc", None
-    if kind == "mach_o":
+    if kind.startswith("mach_o"):  # mach_o / mach_o_le / mach_o_32 / mach_o_32_le
         return "macho", None
     if kind == "axml":
         return "axml", None
@@ -77,6 +86,8 @@ def unpack(target: Path, workdir: Path, opts: dict):
     root = None
     if ctype in ("apk", "zip") or ctype == "apk":
         root = apk_engine.unpack_apk(target, workdir, opts)
+    elif ctype == "text":
+        _unpack_text(target, workdir)
     elif ctype == "ipa":
         root = ipa_engine.unpack_ipa(target, workdir, opts)
     elif ctype == "jar":
@@ -103,6 +114,20 @@ def unpack(target: Path, workdir: Path, opts: dict):
     else:
         generic_engine.run(target, workdir / "corpus" / "strings_other", opts)
     return ctype, root
+
+
+def _unpack_text(target: Path, workdir: Path):
+    """File teks (report/PoC .md, .txt, .json, .log, dll) disalin apa adanya ke
+    corpus — scan langsung teks aslinya, bukan via ekstraksi strings biner."""
+    outdir = workdir / "corpus" / "textfiles"
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / target.name
+    try:
+        shutil.copy2(target, out)
+    except OSError as e:
+        log(f"copy file teks gagal: {e}", "warn")
+        return
+    log(f"text corpus: {target.name}", "ok")
 
 
 def _is_dotnet(path: Path) -> bool:
@@ -553,6 +578,56 @@ def write_report(outdir: Path, target: Path, ctype, frameworks, findings, stats,
     return outdir / "report.md"
 
 
+def _analytic_finding(rule_id, category, severity, description, file, match, context):
+    """Finding sintetis (bukan hasil regex) — pakai struktur Finding/Rule biar
+    mengalir ke report.md & findings.json (Web UI) seperti temuan biasa."""
+    from secret_scanner import Rule, Finding
+    rule = Rule({
+        "id": rule_id, "category": category, "severity": severity,
+        "description": description, "pattern": r"(?!)^$",  # tidak pernah match — hanya struktur
+    })
+    return Finding(rule, file, 1, match, context)
+
+
+def _cryptid_findings(ctype, target: Path, workdir: Path):
+    """Baca hasil deteksi FairPlay (corpus/ios_crypto.json dari unpack_ipa) atau
+    cek langsung file Mach-O tunggal -> finding per binary terenkripsi."""
+    from engines.ipa_engine import check_macho_encryption
+    results = []
+    crypto_file = workdir / "corpus" / "ios_crypto.json"
+    if ctype == "ipa" and crypto_file.exists():
+        try:
+            report = json.loads(crypto_file.read_text(encoding="utf-8"))
+            for entry in report.get("binaries", []):
+                if entry.get("encrypted"):
+                    results.append((entry["file"], entry.get("arch"), entry.get("cryptid"),
+                                    entry.get("cryptoff"), entry.get("cryptsize")))
+        except Exception as e:
+            log(f"ios_crypto.json parse gagal: {e}", "warn")
+    elif ctype == "macho":
+        for s in check_macho_encryption(target):
+            if s.get("encrypted"):
+                results.append((target.name, s.get("arch"), s.get("cryptid"),
+                                s.get("cryptoff"), s.get("cryptsize")))
+
+    out = []
+    for fname, arch, cryptid, off, size in results:
+        out.append(_analytic_finding(
+            "ios_fairplay_encrypted",
+            "iOS Binary Encryption",
+            "medium",
+            "Binary iOS masih terenkripsi FairPlay (cryptid != 0). Hasil strings/symbol "
+            "analysis pada file ini TIDAK lengkap/menipu — decrypt via dump dari device "
+            "jailbroken (frida-ios-dump / bagbak) lalu scan ulang binary hasil dump.",
+            fname,
+            f"cryptid={cryptid} arch={arch} offset={off} size={size}",
+            f"FairPlay encrypted region: offset {off:#x}, {size} bytes ({arch}). "
+            "Semua analisis statis selama ini pada binary tersebut harus dianggap partial.",
+        ))
+        log(f"Finding: FairPlay encrypted -> {fname} [{arch}] cryptid={cryptid}", "warn")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="mobile_audit", description="Otomasi RE + secret scan untuk target mobile/binari")
     ap.add_argument("target", help="APK/AAB/IPA/JAR/DEX/SO/DLL/EXE/HBC atau direktori")
@@ -618,7 +693,10 @@ def main(argv=None):
 
     corpus = workdir / "corpus"
     if not corpus.exists():
-        corpus = workdir
+        if root is not None and Path(root).is_dir():
+            corpus = Path(root)
+        else:
+            corpus = workdir
     if not corpus.exists():
         log("Tidak ada corpus untuk discan", "err")
         sys.exit(1)
@@ -632,11 +710,15 @@ def main(argv=None):
     log(f"Scan selesai ({time.time() - t_scan:.1f}s, {stats['files']} file, {stats['lines']} baris)", "ok")
     log(f"Temuan mentah: {len(findings)}", "ok" if findings else "info")
 
+    # Temuan analitik: FairPlay encryption (cryptid) — hasil strings/symbol pada
+    # binary terenkripsi TIDAK lengkap; hunter perlu tahu batas static analysis.
+    findings.extend(_cryptid_findings(ctype, target, workdir))
+
     log("=== Phase 4: REPORT ===")
     t_report = time.time()
 
     # Metadata aplikasi: SHA-256 target, APKiD fingerprint (TECH STACK/RASP), split APKs
-    meta = {"source": "Operator-supplied APK"}
+    meta = {"source": "Operator-supplied APK" if ctype in ("apk", "zip", "ipa") else "Operator-supplied file"}
     log("SHA-256 target...", "info")
     try:
         h = hashlib.sha256()
@@ -648,7 +730,7 @@ def main(argv=None):
     except Exception as e:
         log(f"SHA-256 gagal: {e}", "warn")
 
-    apkid = run_apkid(target)
+    apkid = run_apkid(target) if ctype in ("apk", "zip", "ipa") else {}
     if apkid:
         meta["tech_stack"] = build_tech_stack(apkid, ctype, fw or {}, target)
         meta["rasp"] = build_rasp(apkid, corpus, workdir / "apk_root")

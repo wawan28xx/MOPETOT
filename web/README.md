@@ -115,7 +115,20 @@ Tab-based viewer:
 ### Search
 - Global search bar di navbar
 - Search across all findings
-- HTMX-powered instant results
+- HTX-powered instant results
+
+### Code Explorer (`/results/{id}` → tab 🔍 Code Explorer)
+- Browse & grep **seluruh corpus hasil scan** (jadx/smali/assets/strings) langsung dari Web UI — 100% offline
+- Tampilan ala **VS Code**: syntax highlighting via highlight.js (theme `vs2015` = palet Dark+), sidebar `#252526`, editor `#1e1e1e`, status bar biru `#007acc` — aksen purple tools tetap di tombol aksi
+- File tree lazy per-direktori (skalabel untuk corpus 100k+ file) + filter nama file global (ripgrep)
+- Grep full-text: regex opsional, case-sensitive, filter scope folder & ekstensi
+- Engine: **ripgrep** (vendored di `bin/ripgrep/rg.exe`) → GNU grep → Python (fallback otomatis)
+- Viewer: line number ala VS Code, match highlight emas, paging file panjang, Enter = match berikutnya
+- Dari tab Secrets: tombol **📂 Explorer** membuka file & baris temuan persis
+- Tombol **🤖 Tanya AI** di viewer → kirim snippet ke Verification Assistant
+- Fallback offline: bila CDN Tailwind/highlight.js tidak termuat, tetap usable dengan tokenizer regex internal
+
+> Catatan performa: corpus besar (100k+ file) di Windows butuh ±30-60 detik untuk grep full-corpus (I/O-bound). Gunakan filter **scope folder** atau **ext** — scoped search < 1 detik.
 
 ---
 
@@ -323,3 +336,58 @@ pip install -r requirements.txt
 **Upload gagal / scan timeout:**
 - File terlalu besar (>200MB) — belum didukung
 - mobile_audit.py error — cek tab Logs di results page
+
+---
+
+## Verification Assistant (AI Chatbox)
+
+Halaman results punya tombol floating **🤖** di pojok kanan bawah yang membuka **split view panel** di sisi kanan (konsep Gemini side panel di Chrome) — konten utama otomatis menyusut & panel chat nempel full-height di kanan:
+- Klik **🤖 Tanya AI** pada baris temuan di tab Secrets & Keys → panel terbuka otomatis dengan konteks temuan itu ter-attach
+- **Enter** kirim pesan, **Shift+Enter** baris baru
+- AI menerima: rule, kategori, severity, file/line, nilai secret **ter-mask**, snippet kode, dan hasil Live Verifier deterministik
+- Riwayat chat tersimpan per-temuan di SQLite (tabel `chat_history`)
+
+**PENTING — Privasi:** nilai secret TIDAK PERNAH dikirim penuh. `web/chat.py` selalu mem-mask nilai (prefix + suffix singkat) sebelum masuk prompt.
+
+### Backend Default: Mistral Vibe CLI (lokal)
+
+AI backend memakai **`vibe` CLI** yang ter-install di sistem lokal (mode single-line command):
+```
+vibe -p "<prompt gabungan>" --output text
+```
+Model dipilih via env `VIBE_ACTIVE_MODEL` per-invocation — default `glm-5-3` (alias model di `~/.vibe/config.toml`). Tidak perlu API key tambahan apa pun; ikut konfigurasi vibe yang sudah ada.
+
+Tidak ada env wajib. Opsional:
+
+| Env | Keterangan |
+|-----|------------|
+| `MOBILE_AUDIT_LLM_MODEL` | Override alias model vibe (default `glm-5-3`) |
+| `MOBILE_AUDIT_VIBE_CMD` | Path eksplisit ke executable `vibe` bila tidak di PATH |
+| `MOBILE_AUDIT_VIBE_TIMEOUT` | Timeout panggilan vibe dalam detik (default 240) |
+
+### Fallback Opsional (provider HTTP OpenAI-compatible)
+
+Set `MOBILE_AUDIT_LLM_PROVIDER` untuk memakai provider HTTP alih-alih vibe CLI:
+
+| Env | Keterangan |
+|-----|------------|
+| `MOBILE_AUDIT_LLM_PROVIDER` | `mistral`, `opencode`, atau `custom` |
+| `MOBILE_AUDIT_LLM_BASE_URL` | Base URL OpenAI-compatible (mis. Ollama: `http://localhost:11434/v1`) |
+| `MOBILE_AUDIT_LLM_API_KEY` | API key (fallback: `MISTRAL_API_KEY` / `OPENCODE_API_KEY`) |
+| `MOBILE_AUDIT_LLM_MODEL` | Nama model |
+
+**Mistral (La Plateforme):**
+```bash
+set MISTRAL_API_KEY=xxxxx
+set MOBILE_AUDIT_LLM_PROVIDER=mistral
+rem model default: mistral-small-latest (ganti via MOBILE_AUDIT_LLM_MODEL jika mau)
+```
+
+**OpenCode (Zen gateway):**
+```bash
+set OPENCODE_API_KEY=xxxxx
+set MOBILE_AUDIT_LLM_PROVIDER=opencode
+set MOBILE_AUDIT_LLM_MODEL=<model-yang-tersedia-di-akun-kamu>
+```
+
+Jika backend belum dikonfigurasi (CLI `vibe` tidak ditemukan saat provider = vibe), panel menampilkan status OFFLINE dan endpoint chat mengembalikan HTTP 503.

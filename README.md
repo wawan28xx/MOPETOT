@@ -25,6 +25,26 @@ Kebutuhan tambahan:
 - Windows x64: beberapa binary bundled di `bin/` adalah tool Windows dan memberi dukungan analisis paling lengkap.
 - Linux/Docker: aplikasi web tetap dapat berjalan; tool Windows-only dapat dilewati dan engine menggunakan fallback yang tersedia.
 
+## Core Features (v1)
+
+- Multi-format target support: APK, AAB, XAPK, IPA, JAR, DEX, SO, DLL, EXE, HBC, directory.
+- Pipeline: Identify -> Unpack -> Scan -> Report.
+- iOS: FairPlay encryption detection (cryptid) — flags encrypted binaries so
+  static-analysis results are not misread (dump needed from jailbroken device).
+- Secret detection with regex rules database (`rules/secrets.json`).
+- Endpoint and manifest extraction.
+- Web dashboard with scan history, filters, and pagination.
+- Login auth (default `mopetot` / `P@petot` — override via `MOPETOT_USER`/`MOPETOT_PASS`).
+- Verification Assistant: AI chatbox via local vibe CLI (masked secrets, per-finding history).
+- Code Explorer: VS Code-style corpus browser + ripgrep search.
+- Live Verifier modules (Firebase, Google API key scopes, endpoint, IP, AWS, Stripe, webhook).
+- PoC + Frida generation from findings.
+- Persistence cache:
+  - verifier result cache (`verification_cache`)
+  - PoC cache (`poc_cache`)
+
+## Prasyarat
+
 Variabel lingkungan opsional:
 
 - `MOBILE_AUDIT_JAVA`: path executable Java yang ingin digunakan.

@@ -23,8 +23,10 @@ from database.db import (
     insert_log, get_scan, get_scans, query_scans, get_findings, get_endpoints,
     get_secrets, get_manifest, get_logs, get_stats, search_findings,
     delete_scan, upsert_verification_cache, get_verification_cache,
-    upsert_poc_cache, get_poc_cache, request_scan, claim_next_queued_scan,
+    upsert_poc_cache, get_poc_cache, insert_chat_message, get_chat_history,
+    clear_chat_history, request_scan, claim_next_queued_scan,
     fail_interrupted_scans
+)
 )
 
 from verification import (
@@ -33,6 +35,8 @@ from verification import (
 )
 
 from poc_engine import PoCEngine
+from chat import get_llm_config, ask_assistant, ChatError
+import code_explorer as ce
 
 logger = logging.getLogger(__name__)
 
@@ -1185,6 +1189,154 @@ async def api_verify_webhook(scan_id: int, request: Request):
         raise HTTPException(400, "Webhook URL is required")
     result = await asyncio.to_thread(check_webhook_status, url)
     return JSONResponse(result)
+
+
+# ------------------------- VERIFICATION ASSISTANT (LLM CHATBOX) -------------------------
+
+@app.get("/api/scan/{scan_id}/chat/config")
+async def api_chat_config(scan_id: int):
+    """Status konfigurasi provider LLM (tanpa membocorkan api key)."""
+    cfg = get_llm_config()
+    return JSONResponse({
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "configured": cfg["configured"],
+        "missing_env": cfg["missing_env"],
+    })
+
+
+@app.get("/api/scan/{scan_id}/chat/history")
+async def api_chat_history(scan_id: int, secret_id: int = None):
+    db = await get_db()
+    try:
+        rows = await get_chat_history(db, scan_id, secret_id)
+        return JSONResponse([
+            {"id": r["id"], "role": r["role"], "content": r["content"],
+             "created_at": r["created_at"]} for r in rows
+        ])
+    finally:
+        await db.close()
+
+
+@app.delete("/api/scan/{scan_id}/chat/history")
+async def api_chat_clear(scan_id: int, secret_id: int = None):
+    db = await get_db()
+    try:
+        await clear_chat_history(db, scan_id, secret_id)
+        return JSONResponse({"status": "ok"})
+    finally:
+        await db.close()
+
+
+# ------------------------- CODE EXPLORER (browse & grep corpus) -------------------------
+
+def _ce_corpus_dir(scan_id: int):
+    """Lokasi corpus hasil scan: work/corpus (utama), fallback corpus/."""
+    for sub in ("work/corpus", "corpus"):
+        d = RESULTS_DIR / str(scan_id) / sub
+        if d.is_dir():
+            return d
+    return None
+
+
+@app.get("/api/scan/{scan_id}/tree")
+async def api_ce_tree(scan_id: int, dir: str = "", filter: str = ""):
+    """Listing lazy satu level direktori corpus; `filter` = cari nama file global."""
+    corpus = _ce_corpus_dir(scan_id)
+    if not corpus:
+        raise HTTPException(404, "Corpus scan tidak ditemukan")
+    try:
+        if filter.strip():
+            files = await asyncio.to_thread(ce.filter_files, corpus, filter)
+            return JSONResponse({"files": files, "filtered": True})
+        result = await asyncio.to_thread(ce.list_dir, corpus, dir)
+    except ce.ExplorerError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse(result)
+
+
+@app.get("/api/scan/{scan_id}/file")
+async def api_ce_file(scan_id: int, path: str = "", offset: int = 0, limit: int = 500):
+    corpus = _ce_corpus_dir(scan_id)
+    if not corpus:
+        raise HTTPException(404, "Corpus scan tidak ditemukan")
+    if not path.strip():
+        raise HTTPException(400, "path is required")
+    try:
+        result = await asyncio.to_thread(ce.read_file, corpus, path, offset, limit)
+    except ce.ExplorerError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse(result)
+
+
+@app.get("/api/scan/{scan_id}/search")
+async def api_ce_search(scan_id: int, q: str = "", regex: int = 0, case: int = 0,
+                        scope: str = "", ext: str = "", limit: int = 500):
+    corpus = _ce_corpus_dir(scan_id)
+    if not corpus:
+        raise HTTPException(404, "Corpus scan tidak ditemukan")
+    if not q.strip():
+        raise HTTPException(400, "q is required")
+    try:
+        result = await asyncio.to_thread(
+            ce.grep, corpus, q, bool(regex), bool(case), scope, ext, limit
+        )
+    except ce.ExplorerError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse(result)
+
+
+@app.post("/api/scan/{scan_id}/chat")
+async def api_chat(scan_id: int, request: Request):
+    """Kirim pesan ke Verification Assistant. Secret selalu di-mask sebelum keluar."""
+    data = await request.json()
+    message = (data.get("message") or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+    secret_id = data.get("secret_id") or None
+
+    cfg = get_llm_config()
+    if not cfg["configured"]:
+        raise HTTPException(503, "LLM provider belum dikonfigurasi. Set env: "
+                            + ", ".join(cfg["missing_env"]))
+
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+
+        secret_row = None
+        if secret_id:
+            secrets = await get_secrets(db, scan_id)
+            secret_row = next((dict(s) for s in secrets if s["id"] == secret_id), None)
+
+        verifier_rows = None
+        if secret_row:
+            cache_rows = await get_verification_cache(db, scan_id)
+            verifier_rows = [dict(r) for r in cache_rows]
+
+        history_rows = await get_chat_history(db, scan_id, secret_id)
+        history = [{"role": r["role"], "content": r["content"]} for r in history_rows]
+
+        await insert_chat_message(db, scan_id, secret_id, "user", message)
+        db.close()
+
+        try:
+            reply = await asyncio.to_thread(
+                ask_assistant, secret_row, verifier_rows, history, message, cfg
+            )
+        except ChatError as e:
+            return JSONResponse({"error": str(e)}, status_code=502)
+
+        db = await get_db()
+        await insert_chat_message(db, scan_id, secret_id, "assistant", reply)
+        return JSONResponse({"reply": reply})
+    finally:
+        try:
+            await db.close()
+        except Exception:
+            pass
 
 
 @app.get("/api/scan/{scan_id}/pocs")
