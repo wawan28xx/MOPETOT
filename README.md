@@ -1,70 +1,76 @@
-# MOPENOT — Mobile Audit Tool
+# MOPETOT — Mobile Audit Tool
 
-MOPENOT adalah toolkit reverse-engineering dan secret scanning untuk aplikasi mobile serta binary terkait. Proyek ini menyediakan dua entry point:
+MOPETOT adalah toolkit reverse-engineering dan secret scanning untuk aplikasi
+mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 
 - `mobile_audit.py`: CLI untuk menjalankan pipeline audit dan menghasilkan laporan JSON/HTML.
 - `web/app.py`: dashboard FastAPI untuk upload target, memantau scan, melihat temuan, dan menjalankan verifier.
 
 ## Fitur utama
 
-- Mendukung APK, AAB, XAPK/APKS/APKM, IPA, JAR, DEX/SMALI, SO, DLL/EXE, HBC, ZIP, dan direktori hasil ekstraksi.
-- Pipeline empat tahap: **Identify → Unpack → Scan → Report**.
-- Secret scanning berbasis regex dari `rules/secrets.json`.
-- Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, dan indikasi RASP.
-- Dashboard dengan riwayat scan, filter, pagination, perbandingan dua scan, log realtime, serta pembuatan PoC.
-- Verifier untuk Firebase, Google API key, endpoint, IP, AWS STS, Stripe, dan webhook.
+- **Multi-format**: APK, AAB, XAPK/APKS/APKM, IPA, JAR, DEX/SMALI, SO, DLL/EXE (.NET via ilspycmd), HBC (Hermes), ZIP, dan direktori hasil ekstraksi.
+- **Pipeline empat tahap**: Identify → Unpack → Scan → Report.
+- **Secret scanning** berbasis regex dari `rules/secrets.json` (rule PEM mensyaratkan body base64 — header tanpa isi tidak dilaporkan).
+- **iOS**: deteksi binary terenkripsi FairPlay (`cryptid`) — hasil strings/symbol pada binary terenkripsi ditandai sebagai partial.
+- **Code Explorer**: browser corpus hasil decompile ala VS Code (syntax highlighting, grep ripgrep, find-in-file ala jadx-gui).
+- **Verification Assistant**: AI chatbox via vibe CLI lokal — secret selalu ter-mask sebelum dikirim ke model.
+- **Login auth**: seluruh halaman & API diproteksi session cookie.
+- **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook.
+- **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
+- **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
+- Dashboard dengan riwayat scan, filter, pagination, perbandingan dua scan, log realtime.
 - Cache SQLite untuk hasil verifier dan PoC.
 
 ## Persyaratan
 
-Untuk menjalankan seluruh kode proyek, gunakan Python **3.13 atau lebih baru**. Versi ini diperlukan oleh sintaks Python yang dipakai engine native dan juga mendukung jalur APKiD opsional.
+| Kebutuhan | Wajib? | Keterangan |
+|---|---|---|
+| Python **3.13+** | Wajib | Sintaks engine native butuh 3.13; 3.14 teruji |
+| `pip install -r web/requirements.txt` | Wajib | Termasuk pin `starlette<0.41` (jangan di-upgrade) |
+| Java 17+ | Wajib (APK) | Repo membawa JRE portable di `bin/jre` — tidak perlu install terpisah |
+| **vibe CLI** (mistral-vibe) | Opsional | Untuk fitur Verification Assistant. Tanpa vibe, fitur lain tetap jalan; chip AI menunjukkan OFFLINE |
+| Node.js 22+ | Opsional | Hanya jika memakai jalur REA/JS analysis (lihat `SARAN PENGEMBANGAN...txt`) |
+| Windows x64 | Disarankan | Binary bundled di `bin/` adalah tool Windows; Linux/Docker tetap bisa jalan dengan fallback |
 
-Kebutuhan tambahan:
+**Kredensial login default: `mopetot` / `P@petot`** — ganti segera via env
+`MOPETOT_USER` / `MOPETOT_PASS`, terutama untuk deployment publik.
 
-- Java 17 atau lebih baru untuk APKTool dan proses berbasis Java.
-- Windows x64: beberapa binary bundled di `bin/` adalah tool Windows dan memberi dukungan analisis paling lengkap.
-- Linux/Docker: aplikasi web tetap dapat berjalan; tool Windows-only dapat dilewati dan engine menggunakan fallback yang tersedia.
+## Variabel lingkungan
 
-## Core Features (v1)
-
-- Multi-format target support: APK, AAB, XAPK, IPA, JAR, DEX, SO, DLL, EXE, HBC, directory.
-- Pipeline: Identify -> Unpack -> Scan -> Report.
-- iOS: FairPlay encryption detection (cryptid) — flags encrypted binaries so
-  static-analysis results are not misread (dump needed from jailbroken device).
-- Secret detection with regex rules database (`rules/secrets.json`).
-- Endpoint and manifest extraction.
-- Web dashboard with scan history, filters, and pagination.
-- Login auth (default `mopetot` / `P@petot` — override via `MOPETOT_USER`/`MOPETOT_PASS`).
-- Verification Assistant: AI chatbox via local vibe CLI (masked secrets, per-finding history).
-- Code Explorer: VS Code-style corpus browser + ripgrep search.
-- Live Verifier modules (Firebase, Google API key scopes, endpoint, IP, AWS, Stripe, webhook).
-- PoC + Frida generation from findings.
-- Persistence cache:
-  - verifier result cache (`verification_cache`)
-  - PoC cache (`poc_cache`)
-
-## Prasyarat
-
-Variabel lingkungan opsional:
-
-- `MOBILE_AUDIT_JAVA`: path executable Java yang ingin digunakan.
-- `MOBILE_AUDIT_PY313`: path Python 3.13 untuk enrichment APKiD.
+**Server & data:**
+- `MOPETOT_USER` / `MOPETOT_PASS`: kredensial login (default `mopetot` / `P@petot`).
+- `MOPETOT_DB_PATH`: path database SQLite; default `web/database/mobile_audit.db`.
 - `MOPETOT_UPLOAD_DIR`: direktori upload; default `web/uploads`.
 - `MOPETOT_RESULTS_DIR`: direktori hasil; default `web/results`.
-- `MOPETOT_DB_PATH`: path database SQLite; default `web/database/mobile_audit.db`.
 - `MOPETOT_MAX_UPLOAD_BYTES`: batas upload; image production memakai 500 MiB.
 - `MOPETOT_MAX_CONCURRENT_SCANS`: jumlah scan aktif; production memakai `1`.
 
-## Instalasi lokal
+**Tool & engine:**
+- `MOBILE_AUDIT_JAVA`: path executable Java (override JRE bundled).
+- `MOBILE_AUDIT_PY313`: path Python 3.13 untuk enrichment APKiD.
+- `MOBILE_AUDIT_VIBE_CMD`: path executable vibe bila tidak ada di PATH.
+
+**Verification Assistant (AI):**
+- Default: vibe CLI lokal, model via `VIBE_ACTIVE_MODEL` (alias model di config vibe, mis. `glm-5-3`).
+- Fallback provider HTTP (opsional): `MOBILE_AUDIT_LLM_PROVIDER` = `mistral` | `opencode` | `custom`, plus `MOBILE_AUDIT_LLM_BASE_URL` / `MOBILE_AUDIT_LLM_API_KEY` / `MOBILE_AUDIT_LLM_MODEL`. Detail: [web/README.md](web/README.md).
+
+## Instalasi lokal (Windows / Linux)
 
 ```bash
-python3.13 -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate        # Linux/macOS: source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r web/requirements.txt
 ```
 
-Database akan dibuat otomatis ketika aplikasi web start. Inisialisasi manual juga tersedia:
+Fitur AI (opsional):
+
+```bash
+pip install mistral-vibe      # atau: uv tool install mistral-vibe
+# set API key di ~/.vibe/.env sesuai instruksi vibe
+```
+
+Database dibuat otomatis saat aplikasi web start. Inisialisasi manual juga tersedia:
 
 ```bash
 python web/init_db.py
@@ -84,13 +90,15 @@ Atau jalankan Uvicorn secara eksplisit:
 python -m uvicorn app:app --app-dir web --host 0.0.0.0 --port 8089
 ```
 
-Buka `http://127.0.0.1:8089`. Direktori runtime berikut dibuat otomatis:
+Buka `http://127.0.0.1:8089`, login dengan kredensial default, lalu upload target.
+Direktori runtime berikut dibuat otomatis:
 
 - `web/uploads/`: file yang di-upload.
 - `web/results/`: corpus, log, dan hasil scan.
 - `web/database/mobile_audit.db`: database SQLite.
 
-Jangan memasukkan ketiga lokasi tersebut ke version control karena dapat berisi binary aplikasi dan temuan sensitif.
+Jangan memasukkan ketiga lokasi tersebut ke version control karena dapat berisi
+binary aplikasi dan temuan sensitif.
 
 ## Menjalankan CLI
 
@@ -118,7 +126,8 @@ Opsi yang tersedia:
 | `--skip-jadx` | Fast mode tanpa dekompilasi JADX |
 | `--skip-blutter` | Fast mode tanpa dekompilasi Blutter |
 
-Hasil utama CLI adalah `findings.json` dan laporan HTML pada direktori output. Jika `--keep` digunakan, artefak intermediate disimpan di `<output>/work/`.
+Hasil utama CLI adalah `findings.json` dan laporan pada direktori output.
+Jika `--keep` digunakan, artefak intermediate disimpan di `<output>/work/`.
 
 ## API penting
 
@@ -134,28 +143,45 @@ Dashboard menggunakan endpoint berikut:
 | `GET` | `/api/scan/{id}/findings` | Temuan keamanan |
 | `GET` | `/api/scan/{id}/secrets` | Secret yang terdeteksi |
 | `GET` | `/api/scan/{id}/endpoints` | Endpoint yang ditemukan |
+| `GET` | `/api/scan/{id}/tree` | File tree corpus (Code Explorer) |
+| `GET` | `/api/scan/{id}/search` | Grep corpus (ripgrep) |
+| `GET` | `/api/scan/{id}/file` | Isi file corpus (viewer) |
+| `POST` | `/api/scan/{id}/chat` | Verification Assistant (AI) |
 | `GET` | `/api/compare/{id1}/{id2}` | Perbandingan dua scan |
 
-Endpoint verifier tersedia pada prefix `/api/scan/{id}/verify/` untuk modul `firebase`, `google-api`, `endpoint`, `ip`, `aws`, `stripe`, dan `webhook`. Dokumentasi interaktif FastAPI tersedia di `/docs` ketika server berjalan.
+Endpoint verifier tersedia pada prefix `/api/scan/{id}/verify/` untuk modul
+`firebase`, `google-api`, `endpoint`, `ip`, `aws`, `stripe`, dan `webhook`.
+Dokumentasi interaktif FastAPI tersedia di `/docs` ketika server berjalan.
 
 ## Docker
 
-Image memakai Python 3.13, Java, `binutils`, dan `file`, berjalan sebagai user non-root, serta memiliki health check pada port `8089`.
+Image memakai Python 3.13, Java, `binutils`, dan `file`, berjalan sebagai user
+non-root, serta memiliki health check pada port `8089`.
 
 ```bash
-docker build -t mopenot:local .
+docker build -t mopetot:local .
 docker run --rm -p 8089:8089 \
-  -v mopenot-data:/data \
-  mopenot:local
+  -v mopetot-data:/data \
+  mopetot:local
 ```
 
-Tool Windows-only yang ada di checkout lokal sengaja tidak disertakan dalam image Linux. Image menyimpan upload, hasil, dan SQLite di `/data`; gunakan satu volume persisten untuk direktori tersebut. Endpoint health tersedia di `/healthz`.
+Tool Windows-only yang ada di checkout lokal sengaja tidak disertakan dalam
+image Linux. Image menyimpan upload, hasil, dan SQLite di `/data`; gunakan satu
+volume persisten untuk direktori tersebut. Endpoint health tersedia di `/healthz`.
 
 ## CI/CD
 
-Jenkins adalah satu-satunya CI/CD production. Push ke branch `master` menjalankan compile/test, build dan health check image, import immutable image ke containerd k3s, rollout Deployment dan CronJob, lalu memverifikasi `https://mopetot.pentest.web.id/healthz`. Rollout dikembalikan ke image sebelumnya bila validasi deployment gagal.
+Jenkins adalah satu-satunya CI/CD production. Push ke branch `master`
+menjalankan compile/test, build dan health check image, import immutable image
+ke containerd k3s, rollout Deployment dan CronJob, lalu memverifikasi
+`https://mopetot.pentest.web.id/healthz`. Rollout dikembalikan ke image
+sebelumnya bila validasi deployment gagal.
 
-Jenkins job memakai repository public `wawan28xx/MOPETOT`, trigger webhook GitHub, dan polling lima-menit sebagai fallback. Agent `k3s-platform-prod-kubeconfig` harus memiliki Docker, izin import image melalui `sudo -n k3s ctr`, serta kubeconfig terbatas `/home/deit/.kube/mopetot-config`.
+Jenkins job memakai repository public `wawan28xx/MOPETOT`, trigger webhook
+GitHub, dan polling lima-menit sebagai fallback. Agent
+`k3s-platform-prod-kubeconfig` harus memiliki Docker, izin import image
+melalui `sudo -n k3s ctr`, serta kubeconfig terbatas
+`/home/deit/.kube/mopetot-config`.
 
 Webhook repository menggunakan event **push** dengan Payload URL
 `https://jenkins.pentest.web.id/github-webhook/` dan content type
@@ -170,10 +196,12 @@ Manifest production dan script provisioning berada di `/home/deit/defendit-k8s`:
 - `scripts/setup-mopetot-jenkins.sh`
 - `scripts/activate-mopetot-tunnel.sh`
 
-Production memakai satu replica karena SQLite, antrean in-process, dan PVC `ReadWriteOnce`. PVC Longhorn berukuran 50 GiB. CronJob menghapus scan completed/failed yang lebih lama dari 30 hari; jalankan dry-run sebelum aktivasi:
+Production memakai satu replica karena SQLite, antrean in-process, dan PVC
+`ReadWriteOnce`. PVC Longhorn berukuran 50 GiB. CronJob menghapus scan
+completed/failed yang lebih lama dari 30 hari; jalankan dry-run sebelum aktivasi:
 
 ```bash
-docker run --rm -v mopenot-data:/data --workdir /app/web mopenot:local \
+docker run --rm -v mopetot-data:/data --workdir /app/web mopetot:local \
   python -m maintenance.retention --days 30 --dry-run
 ```
 
@@ -186,16 +214,22 @@ docker run --rm -v mopenot-data:/data --workdir /app/web mopenot:local \
 ├── engines/                 # Engine unpacking dan analisis per format
 ├── rules/secrets.json       # Rule secret scanning
 ├── web/app.py               # FastAPI web UI/API
+├── web/auth.py              # Login & session auth
+├── web/chat.py              # Verification Assistant (AI, vibe CLI)
+├── web/code_explorer.py     # Code Explorer (browse + grep corpus)
 ├── web/database/            # SQLite access dan schema
-├── web/templates/           # Template dashboard
-├── web/static/              # CSS dan JavaScript
+├── web/templates/           # Template dashboard (tema cyberpunk)
+├── web/static/              # CSS, JS, fonts, audio
 ├── web/requirements.txt     # Dependency Python
+├── bin/                     # Tool vendored (jre, jadx, apktool, ripgrep, ...)
 ├── Dockerfile
 ├── Jenkinsfile
 └── .github/workflows/ci-cd.yml
 ```
 
-Dokumentasi tambahan tersedia di [web/README.md](web/README.md), [DOKUMENTASI_MOBILE_AUDIT.md](DOKUMENTASI_MOBILE_AUDIT.md), dan [CHANGELOG.md](CHANGELOG.md).
+Dokumentasi tambahan tersedia di [web/README.md](web/README.md),
+[DOKUMENTASI_MOBILE_AUDIT.md](DOKUMENTASI_MOBILE_AUDIT.md), dan
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Validasi lokal
 
@@ -205,12 +239,45 @@ Perintah yang digunakan CI untuk pemeriksaan sintaks:
 python -m compileall -q mobile_audit.py apkid_wrapper.py secret_scanner.py engines web
 ```
 
-Smoke test web dapat dilakukan dengan menjalankan server lalu membuka `/healthz` atau `/docs`.
+Test suite regresi yang tersedia:
+
+```bash
+python test_cryptid.py          # deteksi FairPlay (cryptid)
+python test_pem_rules.py        # rule PEM (base64 body)
+cd web
+python test_auth.py             # login & session
+python test_chat_assistant.py   # Verification Assistant (mock)
+python test_code_explorer.py    # Code Explorer backend
+python test_node_syntax.py      # syntax JS template results.html
+node test_hljs_pipeline.js      # pipeline syntax highlighting
+node test_syntax_highlight.js   # fallback tokenizer
+```
+
+Smoke test web dapat dilakukan dengan menjalankan server lalu membuka `/healthz`
+atau `/docs`.
+
+## Troubleshooting
+
+- **Startup crash `Router.__init__() got an unexpected keyword argument 'on_startup'`**:
+  versi starlette terlalu baru. Jalankan
+  `pip install "starlette>=0.37.2,<0.41"` (pin sudah ada di requirements.txt).
+- **`sqlite3.OperationalError: near ">>"` saat startup**: gunakan versi repo
+  terbaru (fixed di commit `8f11c74`); hapus database lama yang rusak.
+- **Port 8089 bentrok**: `netstat -ano | findstr :8089` lalu `taskkill /f /pid <PID>`,
+  atau jalankan `python -m uvicorn app:app --app-dir web --port 8089`.
+- **Chip AI OFFLINE**: vibe CLI tidak ditemukan — `pip install mistral-vibe`
+  atau set `MOBILE_AUDIT_VIBE_CMD` ke path vibe.
+- **TECH STACK / APKiD kosong**: set `MOBILE_AUDIT_PY313` ke Python 3.13.
+- **Font logo "Cyberpunk" (Lyon ArtZ)**: free for personal use — cek lisensi
+  sebelum distribusi komersial.
 
 ## Keamanan dan privasi
 
 - Hanya audit aplikasi/binary yang Anda miliki atau memiliki izin untuk mengujinya.
 - Perlakukan upload, corpus, laporan, secret, dan hasil verifier sebagai data sensitif.
-- Jangan commit `web/uploads/`, `web/results/`, database SQLite, atau laporan klien ke repository publik.
-- Verifier melakukan request jaringan ke target yang diberikan; gunakan hanya pada target yang berwenang.
-- Deployment publik tidak memiliki autentikasi. Siapa pun dapat mengunggah file, menjalankan verifier, membaca atau menghapus hasil; batas upload, antrean tunggal, dan retention bukan pengganti kontrol akses.
+- Jangan commit `web/uploads/`, `web/results/`, database SQLite, atau laporan
+  klien ke repository publik.
+- Verifier melakukan request jaringan ke target yang diberikan; gunakan hanya
+  pada target yang berwenang.
+- Default login `mopetot`/`P@petot` wajib diganti (env `MOPETOT_USER`/`MOPETOT_PASS`)
+  untuk deployment di luar localhost.

@@ -21,17 +21,17 @@ RUN apt-get update \
         file \
         unzip \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 mopenot \
-    && useradd --uid 10001 --gid mopenot --home-dir /app --no-create-home mopenot
+    && groupadd --gid 10001 mopetot \
+    && useradd --uid 10001 --gid mopetot --home-dir /app --no-create-home mopetot
 
 COPY web/requirements.txt /tmp/requirements.txt
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r /tmp/requirements.txt
 
-COPY --chown=mopenot:mopenot . .
+COPY --chown=mopetot:mopetot . .
 
 RUN mkdir -p /data/uploads /data/results /data/database \
-    && chown -R mopenot:mopenot /data \
+    && chown -R mopetot:mopetot /data \
     && if [ -f bin/jadx/bin/jadx ]; then \
         chmod +x bin/jadx/bin/jadx; \
         rm -f bin/jadx/bin/jadx.bat; \
@@ -40,7 +40,7 @@ RUN mkdir -p /data/uploads /data/results /data/database \
     && python -m compileall -q \
         mobile_audit.py apkid_wrapper.py secret_scanner.py engines web
 
-USER mopenot
+USER mopetot
 
 EXPOSE 8089
 
