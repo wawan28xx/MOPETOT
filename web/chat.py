@@ -339,8 +339,15 @@ def build_finding_context(secret: dict, verifier_rows: Optional[List[dict]] = No
 
 # ------------------------- VIBE CLI (backend default) -------------------------
 
+VIBE_PROMPT_MAX = 28000             # batas command line Windows ~32767 chars
+
+
 def _build_vibe_prompt(messages: List[dict]) -> str:
-    """Rangkai seluruh percakapan jadi SATU prompt untuk `vibe -p` (one-shot)."""
+    """Rangkai seluruh percakapan jadi SATU prompt untuk `vibe -p` (one-shot).
+
+    Prompt dijaga di bawah VIBE_PROMPT_MAX: bila terlalu panjang, percakapan
+    paling lama dibuang duluan (system prompt + pertanyaan terakhir dipertahankan).
+    """
     parts = []
     for m in messages:
         role = m.get("role")
@@ -360,6 +367,9 @@ def _build_vibe_prompt(messages: List[dict]) -> str:
         "JANGAN menjalankan tools, command, shell, atau membaca file apa pun — "
         "semua data yang kamu butuhkan sudah ada di prompt ini."
     )
+    # buang percakapan paling lama bila prompt mendekati batas command line
+    while len(parts) > 3 and len("\n\n".join(parts)) > VIBE_PROMPT_MAX:
+        parts.pop(1)
     return "\n\n".join(parts)
 
 
@@ -396,8 +406,10 @@ def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
         t0 = time.time()
         try:
             reply, code, err_tail = _vibe_attempt(cmd, env, timeout, log)
-        except FileNotFoundError:
-            raise ChatError("CLI `vibe` tidak ditemukan. Set MOBILE_AUDIT_VIBE_CMD ke path vibe atau install ulang.")
+        except FileNotFoundError as e:
+            raise ChatError("CLI `vibe` (%s) tidak bisa dijalankan: %s. "
+                            "Set MOBILE_AUDIT_VIBE_CMD ke path vibe atau install ulang."
+                            % (cfg["vibe_cmd"], e))
         if log:
             log("⏱️ Proses vibe selesai: exit %s dalam %.1fs (jawaban: %d chars)"
                 % (code, time.time() - t0, len(reply)))

@@ -1507,10 +1507,20 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
         log("⚙️ Backend AI: %s" % cfg["provider"])
 
         history_rows = await get_chat_history(db, scan_id, secret_id)
-        history = [{"role": r["role"], "content": r["content"]} for r in history_rows]
+        # buang blok ringkasan yang dulu sempat tersimpan di history
+        # (ringkasan hanya boleh hidup di prompt, bukan di DB)
+        history = []
+        for r in history_rows:
+            c = r["content"]
+            idx = c.find("[RIWAYAT VALIDASI TERBARU")
+            if idx > 0:
+                c = c[:idx].rstrip()
+            history.append({"role": r["role"], "content": c})
 
         # Mode chat: sertakan ringkasan validasi terbaru LINTAS temuan supaya
         # pertanyaan global ("temuan validnya apa aja?") bisa dijawab.
+        # HANYA untuk prompt agent — jangan disimpan ke history (anti bloat).
+        agent_message = message
         if mode == "chat":
             try:
                 recent = await get_recent_validations(db, scan_id, limit=6)
@@ -1523,8 +1533,8 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
                     if rep:
                         summary_lines.append("- [validasi temuan] %s" % rep[:600])
                 if summary_lines:
-                    message = (message + "\n\n[RIWAYAT VALIDASI TERBARU OLEH AGENT — "
-                               "pakai sebagai konteks bila relevan]\n" + "\n".join(summary_lines))[:8000]
+                    agent_message = (message + "\n\n[RIWAYAT VALIDASI TERBARU OLEH AGENT — "
+                                     "pakai sebagai konteks bila relevan]\n" + "\n".join(summary_lines))[:8000]
                     log("🧾 Ringkasan validasi lintas temuan disertakan: %d entri" % len(summary_lines))
 
         await insert_chat_message(db, scan_id, secret_id, "user", message)
@@ -1532,7 +1542,7 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
 
         try:
             reply = await asyncio.to_thread(
-                ask_assistant, secret_row, verifier_rows, history, message, cfg, log
+                ask_assistant, secret_row, verifier_rows, history, agent_message, cfg, log
             )
         except ChatError as e:
             agent_job_finish(job_id, error=str(e))

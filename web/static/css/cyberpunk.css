@@ -966,3 +966,30 @@ footer.footer { position: relative; z-index: 1; }
     background: rgba(0, 240, 255, 0.04);
     word-break: break-all;
 }
+/* markdown table di bubble chat Validate Finding */
+.vf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-primary);
+    margin: 6px 0;
+    white-space: normal;
+}
+.vf-table th {
+    background: rgba(255, 0, 234, 0.12);
+    color: #ff00ea;
+    border: 1px solid var(--border);
+    padding: 5px 8px;
+    text-align: left;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+.vf-table td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    vertical-align: top;
+}
+.vf-table tbody tr:nth-child(odd) { background: rgba(0, 240, 255, 0.03); }
+.vf-table tbody tr:hover { background: rgba(0, 240, 255, 0.08); }
