@@ -26,7 +26,7 @@ from database.db import (
     delete_scan, upsert_verification_cache, get_verification_cache,
     upsert_poc_cache, get_poc_cache, insert_chat_message, get_chat_history,
     clear_chat_history, request_scan, claim_next_queued_scan,
-    fail_interrupted_scans
+    fail_interrupted_scans, get_recent_validations
 )
 
 from verification import (
@@ -1508,6 +1508,25 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
 
         history_rows = await get_chat_history(db, scan_id, secret_id)
         history = [{"role": r["role"], "content": r["content"]} for r in history_rows]
+
+        # Mode chat: sertakan ringkasan validasi terbaru LINTAS temuan supaya
+        # pertanyaan global ("temuan validnya apa aja?") bisa dijawab.
+        if mode == "chat":
+            try:
+                recent = await get_recent_validations(db, scan_id, limit=6)
+            except Exception:
+                recent = []
+            if recent:
+                summary_lines = []
+                for r in reversed(recent):  # urut lama -> baru
+                    rep = re.sub(r"\s+", " ", (r["reply"] or "")).strip()
+                    if rep:
+                        summary_lines.append("- [validasi temuan] %s" % rep[:600])
+                if summary_lines:
+                    message = (message + "\n\n[RIWAYAT VALIDASI TERBARU OLEH AGENT — "
+                               "pakai sebagai konteks bila relevan]\n" + "\n".join(summary_lines))[:8000]
+                    log("🧾 Ringkasan validasi lintas temuan disertakan: %d entri" % len(summary_lines))
+
         await insert_chat_message(db, scan_id, secret_id, "user", message)
         db.close()
 

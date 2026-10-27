@@ -98,6 +98,56 @@ def build_validation_message(secret, module: str, target: str,
 VIBE_DEFAULT_MODEL = "glm-5-3"        # alias model di ~/.vibe/config.toml
 VIBE_DEFAULT_TIMEOUT = 240            # detik; override MOBILE_AUDIT_VIBE_TIMEOUT
 VIBE_MAX_TURNS = "2"                  # cukup untuk Q&A tanpa tool loop
+VIBE_RETRIES = 2                       # retry saat vibe gagal transient (rate limit dsb.)
+
+
+def _vibe_attempt(cmd: List[str], env: dict, timeout: float,
+                  log: Optional[Any] = None):
+    """Satu percobaan jalankan vibe. Return (reply, exit_code, stderr_tail).
+
+    stdout/stderr di-stream per baris ke `log` bila diberikan (live UI).
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
+        env=env, cwd=tempfile.gettempdir(),
+    )
+    stdout_chunks: List[str] = []
+    stderr_lines: List[str] = []
+
+    def _pump(stream, prefix: str, collect_out: bool, collect_err: bool):
+        try:
+            for line in stream:
+                line = line.rstrip()
+                if not line:
+                    continue
+                if log:
+                    log(prefix + line)
+                if collect_out:
+                    stdout_chunks.append(line)
+                if collect_err:
+                    stderr_lines.append(line)
+        except Exception:
+            pass
+
+    out_thread = threading.Thread(target=_pump, args=(proc.stdout, "📡 vibe> ", True, False), daemon=True)
+    err_thread = threading.Thread(target=_pump, args=(proc.stderr, "⚠️ vibe> ", False, True), daemon=True)
+    out_thread.start()
+    err_thread.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout + 30)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+    out_thread.join(timeout=5)
+    err_thread.join(timeout=5)
+    reply = "\n".join(stdout_chunks).strip()
+    if timed_out:
+        # deadline: jawaban parsial/utuh yang sudah keluar tetap dipakai
+        return reply, 124, "timeout (jawaban parsial diterima bila ada)"
+    return reply, proc.returncode, "\n".join(stderr_lines[-8:])
 
 HTTP_PRESETS: Dict[str, Dict[str, str]] = {
     "mistral": {
@@ -317,10 +367,13 @@ def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
                      log: Optional[Any] = None) -> str:
     """Jalankan single-line command: vibe -p "<prompt>" --output text (model via env).
 
-    Bila `log` diberikan: stdout/stderr vibe di-stream per baris ke log (live UI).
+    Robust terhadap kegagalan transient (rate limit, gangguan provider, exit != 0
+    dengan jawaban tetap keluar): jawaban dipakai bila ada; retry otomatis bila
+    kosong. stdout/stderr di-stream per baris ke `log` (live UI) bila diberikan.
     """
     prompt = _build_vibe_prompt(messages)
     timeout = float(os.environ.get("MOBILE_AUDIT_VIBE_TIMEOUT") or VIBE_DEFAULT_TIMEOUT)
+    retries = int(os.environ.get("MOBILE_AUDIT_VIBE_RETRIES") or VIBE_RETRIES)
     env = os.environ.copy()
     env["VIBE_ACTIVE_MODEL"] = cfg["model"]
     cmd = [
@@ -333,70 +386,29 @@ def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
         log("🚀 Eksekusi CLI: %s -p <prompt %d chars> --output text --max-turns %s --time-limit %ds (cwd: temp)"
             % (cfg["vibe_cmd"], len(prompt), VIBE_MAX_TURNS, int(timeout)))
         log("🧠 Model aktif: %s (via VIBE_ACTIVE_MODEL)" % cfg["model"])
+
+    last_err = ""
+    for attempt in range(1 + max(0, retries)):
+        if attempt:
+            log and log("🔁 Retry %d/%d — kegagalan sebelumnya: %s. Tunggu 5s..."
+                        % (attempt, retries, last_err[:150] or "-"))
+            time.sleep(5)
         t0 = time.time()
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace",
-                env=env, cwd=tempfile.gettempdir(),
-            )
+            reply, code, err_tail = _vibe_attempt(cmd, env, timeout, log)
         except FileNotFoundError:
             raise ChatError("CLI `vibe` tidak ditemukan. Set MOBILE_AUDIT_VIBE_CMD ke path vibe atau install ulang.")
+        if log:
+            log("⏱️ Proses vibe selesai: exit %s dalam %.1fs (jawaban: %d chars)"
+                % (code, time.time() - t0, len(reply)))
+        if reply:
+            if code != 0:
+                log and log("⚠️ exit code %s tapi jawaban tersedia — jawaban dipakai." % code)
+            return reply
+        last_err = "exit %s: %s" % (code, err_tail[:200] or "tanpa output")
 
-        stdout_chunks: List[str] = []
-
-        def _pump(stream, prefix: str, collect: bool):
-            try:
-                for line in stream:
-                    line = line.rstrip()
-                    if not line:
-                        continue
-                    log(prefix + line)
-                    if collect:
-                        stdout_chunks.append(line)
-            except Exception:
-                pass
-
-        out_thread = threading.Thread(target=_pump, args=(proc.stdout, "📡 vibe> ", True), daemon=True)
-        err_thread = threading.Thread(target=_pump, args=(proc.stderr, "⚠️ vibe> ", False), daemon=True)
-        out_thread.start()
-        err_thread.start()
-        try:
-            proc.wait(timeout=timeout + 30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise ChatError(f"`vibe` timeout setelah {int(timeout)}s. Coba lagi atau naikkan MOBILE_AUDIT_VIBE_TIMEOUT.")
-        out_thread.join(timeout=5)
-        err_thread.join(timeout=5)
-        log("⏱️ Proses vibe selesai: exit %s dalam %.1fs" % (proc.returncode, time.time() - t0))
-        if proc.returncode != 0:
-            raise ChatError(f"`vibe` exit code {proc.returncode}.")
-        reply = "\n".join(stdout_chunks).strip()
-        if not reply:
-            raise ChatError("`vibe` tidak mengembalikan jawaban. Cek koneksi/model dengan: vibe -p \"tes\" --output text")
-        return reply
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout + 30, env=env,
-            cwd=tempfile.gettempdir(),  # cwd netral: tidak load config project
-        )
-    except FileNotFoundError:
-        raise ChatError("CLI `vibe` tidak ditemukan. Set MOBILE_AUDIT_VIBE_CMD ke path vibe atau install ulang.")
-    except subprocess.TimeoutExpired:
-        raise ChatError(f"`vibe` timeout setelah {int(timeout)}s. Coba lagi atau naikkan MOBILE_AUDIT_VIBE_TIMEOUT.")
-
-    if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()
-        raise ChatError(f"`vibe` exit code {proc.returncode}: {stderr[:300] or 'tanpa pesan error'}")
-    reply = (proc.stdout or "").strip()
-    if not reply:
-        raise ChatError("`vibe` tidak mengembalikan jawaban. Cek koneksi/model dengan: vibe -p \"tes\" --output text")
-    return reply
+    raise ChatError("`vibe` gagal setelah %d percobaan: %s. Cek koneksi/model."
+                    % (1 + max(0, retries), last_err[:300]))
 
 
 # ------------------------- HTTP provider (fallback opsional) -------------------------

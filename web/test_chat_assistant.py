@@ -104,22 +104,33 @@ for k in ("MOBILE_AUDIT_LLM_PROVIDER", "MOBILE_AUDIT_LLM_MODEL",
 os.environ["MOBILE_AUDIT_VIBE_CMD"] = "vibe"  # biar configured=True
 captured = {}
 
-class FakeCompleted:
-    returncode = 0
-    stdout = "jawaban analisis dari vibe"
-    stderr = ""
+class FakeProc:
+    def __init__(self, lines, err_lines=(), returncode=0):
+        self.returncode = returncode
+        self._out = iter(list(lines))
+        self._err = iter(list(err_lines))
+    @property
+    def stdout(self):
+        return self._out
+    @property
+    def stderr(self):
+        return self._err
+    def wait(self, timeout=None):
+        return 0
+    def kill(self):
+        pass
 
-def fake_run(cmd, **kwargs):
+def fake_popen(cmd, **kwargs):
     captured["cmd"] = cmd
     captured["env"] = kwargs.get("env", {})
-    return FakeCompleted()
+    return FakeProc(["jawaban analisis dari vibe\n"])
 
-real_run = chat.subprocess.run
-chat.subprocess.run = fake_run
+real_popen = chat.subprocess.Popen
+chat.subprocess.Popen = fake_popen
 try:
     reply = chat.ask_assistant(secret, verifier, [], "analisis dong")
 finally:
-    chat.subprocess.run = real_run
+    chat.subprocess.Popen = real_popen
 
 assert reply == "jawaban analisis dari vibe"
 cmd = captured["cmd"]
@@ -130,18 +141,29 @@ assert "JANGAN menjalankan tools" in cmd[2]
 assert "INSTRUKSI SISTEM" in cmd[2] and "PERTANYAAN HUNTER" in cmd[2]
 print("[7] vibe completion OK (command + VIBE_ACTIVE_MODEL + prompt utuh)")
 
-# --- vibe error path: exit code != 0 ---
-def fake_run_err(cmd, **kwargs):
-    return type("Err", (), {"returncode": 1, "stdout": "", "stderr": "boom"})()
-chat.subprocess.run = fake_run_err
+# --- vibe error path: exit != 0 tanpa output -> retry lalu ChatError ---
+os.environ["MOBILE_AUDIT_VIBE_RETRIES"] = "0"
+def fake_popen_err(cmd, **kwargs):
+    return FakeProc([], ["boom"], returncode=1)
+chat.subprocess.Popen = fake_popen_err
 try:
     chat.ask_assistant(secret, None, [], "tes")
     raise AssertionError("harusnya raise ChatError")
 except chat.ChatError as e:
-    assert "exit code 1" in str(e) and "boom" in str(e)
+    assert "exit 1" in str(e) and "boom" in str(e), str(e)
 finally:
-    chat.subprocess.run = real_run
-print("[8] vibe error path OK")
+    chat.subprocess.Popen = real_popen
+    os.environ.pop("MOBILE_AUDIT_VIBE_RETRIES", None)
+print("[8] vibe error path OK (exit != 0 tanpa jawaban -> ChatError + retry)")
+
+# --- vibe robust: exit != 0 tapi jawaban keluar -> jawaban dipakai ---
+chat.subprocess.Popen = lambda cmd, **kw: FakeProc(["jawaban utuh\n"], ["warn x"])
+try:
+    r2 = chat.ask_assistant(secret, None, [], "tes")
+    assert r2 == "jawaban utuh", r2
+finally:
+    chat.subprocess.Popen = real_popen
+print("[8b] vibe robust path OK (exit != 0 dengan jawaban -> jawaban dipakai)")
 
 # --- HTTP fallback: dipatch requests.post biar tanpa network ---
 os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = "mistral"

@@ -502,6 +502,31 @@ async def get_chat_history(db, scan_id, secret_id=None):
     return await cursor.fetchall()
 
 
+async def get_recent_validations(db, scan_id, limit=6):
+    """Ambil pasangan (prompt validasi, jawaban agent) terbaru lintas temuan
+    (secret_id apa pun) — dipakai chat Validate Finding untuk jawaban global
+    seperti 'temuan validnya apa aja?'."""
+    cursor = await db.execute(
+        """
+        SELECT u.secret_id AS secret_id, a.content AS reply
+        FROM chat_history u
+        JOIN chat_history a
+          ON a.scan_id = u.scan_id AND a.secret_id IS u.secret_id
+         AND a.role = 'assistant' AND a.id = (
+             SELECT MIN(b.id) FROM chat_history b
+             WHERE b.scan_id = u.scan_id AND b.secret_id IS u.secret_id
+               AND b.role = 'assistant' AND b.id > u.id
+         )
+        WHERE u.scan_id = ? AND u.role = 'user'
+          AND u.content LIKE 'VALIDATION REQUEST%'
+        ORDER BY u.id DESC
+        LIMIT ?
+        """,
+        (scan_id, limit),
+    )
+    return await cursor.fetchall()
+
+
 async def clear_chat_history(db, scan_id, secret_id=None):
     if secret_id:
         await db.execute(
