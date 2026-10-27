@@ -155,7 +155,7 @@ HTTP_PRESETS: Dict[str, Dict[str, str]] = {
         "key_env": "MISTRAL_API_KEY",
         "default_model": "mistral-small-latest",
     },
-    "opencode": {
+    "opencode_api": {
         "base_url": "https://opencode.ai/zen/v1",
         "key_env": "OPENCODE_API_KEY",
         "default_model": "",
@@ -234,27 +234,110 @@ def make_logger(job_id: str):
     return _log
 
 
-def _find_vibe_cmd() -> Optional[str]:
-    explicit = (os.environ.get("MOBILE_AUDIT_VIBE_CMD") or "").strip()
+# ---------------- CLI agent presets (multi-provider) ----------------
+# Setiap CLI agent didefinisikan dengan: binary, env override path, template
+# argumen ({PROMPT}/{MODEL}/{TIMEOUT}), dan default model.
+# Provider dipilih via env MOBILE_AUDIT_LLM_PROVIDER = vibe | claude | opencode |
+# gemini | codex | aider | mistral | opencode_api | custom.
+CLI_PRESETS: Dict[str, Dict[str, Any]] = {
+    "vibe": {
+        "label": "Mistral Vibe",
+        "bin": "vibe",
+        "cmd_env": "MOBILE_AUDIT_VIBE_CMD",
+        "args": ["-p", "{PROMPT}", "--output", "text",
+                 "--max-turns", VIBE_MAX_TURNS, "--time-limit", "{TIMEOUT}"],
+        "model_env": "VIBE_ACTIVE_MODEL",  # model dikirim via env var
+        "default_model": VIBE_DEFAULT_MODEL,
+    },
+    "claude": {
+        "label": "Claude Code",
+        "bin": "claude",
+        "cmd_env": "MOBILE_AUDIT_CLAUDE_CMD",
+        "args": ["-p", "{PROMPT}", "--output-format", "text"],
+        "model_flag": ["--model", "{MODEL}"],
+        "default_model": "sonnet",
+    },
+    "opencode": {
+        "label": "OpenCode",
+        "bin": "opencode",
+        "cmd_env": "MOBILE_AUDIT_OPENCODE_CMD",
+        "args": ["run", "{PROMPT}"],
+        "model_flag": ["-m", "{MODEL}"],
+        "default_model": "",
+    },
+    "gemini": {
+        "label": "Gemini CLI",
+        "bin": "gemini",
+        "cmd_env": "MOBILE_AUDIT_GEMINI_CMD",
+        "args": ["-p", "{PROMPT}"],
+        "model_flag": ["-m", "{MODEL}"],
+        "default_model": "gemini-2.5-pro",
+    },
+    "codex": {
+        "label": "Codex CLI (OpenAI)",
+        "bin": "codex",
+        "cmd_env": "MOBILE_AUDIT_CODEX_CMD",
+        "args": ["exec", "--skip-git-repo-check", "{PROMPT}"],
+        "model_flag": ["-m", "{MODEL}"],
+        "default_model": "gpt-5.1-codex",
+    },
+    "aider": {
+        "label": "Aider",
+        "bin": "aider",
+        "cmd_env": "MOBILE_AUDIT_AIDER_CMD",
+        "args": ["--message", "{PROMPT}", "--yes-always", "--no-auto-commits", "--no-git"],
+        "model_flag": ["--model", "{MODEL}"],
+        "default_model": "",
+    },
+}
+
+
+def _find_cli_cmd(provider: str) -> Optional[str]:
+    """Cari path binary CLI agent: env override dulu, lalu PATH."""
+    preset = CLI_PRESETS.get(provider) or {}
+    explicit = (os.environ.get(preset.get("cmd_env") or "") or "").strip()
     if explicit:
         return explicit
-    return shutil.which("vibe")
+    return shutil.which(preset.get("bin") or provider)
+
+
+def list_cli_providers() -> List[Dict[str, Any]]:
+    """Inventory CLI agent yang ter-install (untuk UI/config)."""
+    out = []
+    for name, preset in CLI_PRESETS.items():
+        out.append({
+            "name": name,
+            "label": preset["label"],
+            "found": bool(_find_cli_cmd(name)),
+            "default_model": preset.get("default_model") or "",
+        })
+    return out
 
 
 def get_llm_config() -> Dict[str, Any]:
     provider = (os.environ.get("MOBILE_AUDIT_LLM_PROVIDER") or "vibe").strip().lower()
 
-    if provider == "vibe":
-        model = (os.environ.get("MOBILE_AUDIT_LLM_MODEL") or VIBE_DEFAULT_MODEL).strip()
-        vibe_cmd = _find_vibe_cmd()
+    # --- CLI agent providers (vibe/claude/opencode/gemini/codex/aider) ---
+    if provider in CLI_PRESETS:
+        preset = CLI_PRESETS[provider]
+        model = (os.environ.get("MOBILE_AUDIT_LLM_MODEL")
+                 or preset.get("default_model") or "").strip()
+        cli_cmd = _find_cli_cmd(provider)
+        missing = []
+        if not cli_cmd:
+            missing.append("CLI `%s` tidak ditemukan di PATH (atau set %s)"
+                           % (preset["bin"], preset.get("cmd_env")))
         return {
-            "provider": "vibe",
+            "provider": provider,
             "base_url": "",
             "api_key": "",
             "model": model,
-            "configured": bool(vibe_cmd),
-            "missing_env": [] if vibe_cmd else ["CLI `vibe` tidak ditemukan di PATH"],
-            "vibe_cmd": vibe_cmd or "vibe",
+            "configured": bool(cli_cmd),
+            "missing_env": missing,
+            "cli_cmd": cli_cmd or preset["bin"],
+            "cli_preset": preset,
+            # backward-compat (kode lama menyebut vibe_cmd)
+            "vibe_cmd": cli_cmd or preset["bin"],
         }
 
     if provider in HTTP_PRESETS:
@@ -373,29 +456,36 @@ def _build_vibe_prompt(messages: List[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
-                     log: Optional[Any] = None) -> str:
-    """Jalankan single-line command: vibe -p "<prompt>" --output text (model via env).
+def _cli_completion(messages: List[dict], cfg: Dict[str, Any],
+                    log: Optional[Any] = None) -> str:
+    """Jalankan CLI agent (vibe/claude/opencode/gemini/codex/aider) single-shot.
 
-    Robust terhadap kegagalan transient (rate limit, gangguan provider, exit != 0
-    dengan jawaban tetap keluar): jawaban dipakai bila ada; retry otomatis bila
-    kosong. stdout/stderr di-stream per baris ke `log` (live UI) bila diberikan.
+    Perintah dibangun dari preset provider (lihat CLI_PRESETS). Robust terhadap
+    kegagalan transient (rate limit, gangguan provider, exit != 0 dengan jawaban
+    tetap keluar): jawaban dipakai bila ada; retry otomatis bila kosong.
+    stdout/stderr di-stream per baris ke `log` (live UI) bila diberikan.
     """
     prompt = _build_vibe_prompt(messages)
-    timeout = float(os.environ.get("MOBILE_AUDIT_VIBE_TIMEOUT") or VIBE_DEFAULT_TIMEOUT)
+    preset = cfg.get("cli_preset") or CLI_PRESETS.get(cfg["provider"]) or CLI_PRESETS["vibe"]
+    timeout = float(os.environ.get("MOBILE_AUDIT_CLI_TIMEOUT")
+                    or os.environ.get("MOBILE_AUDIT_VIBE_TIMEOUT")
+                    or VIBE_DEFAULT_TIMEOUT)
     retries = int(os.environ.get("MOBILE_AUDIT_VIBE_RETRIES") or VIBE_RETRIES)
     env = os.environ.copy()
-    env["VIBE_ACTIVE_MODEL"] = cfg["model"]
-    cmd = [
-        cfg["vibe_cmd"], "-p", prompt,
-        "--output", "text",
-        "--max-turns", VIBE_MAX_TURNS,
-        "--time-limit", str(int(timeout)),
-    ]
+    if preset.get("model_env") and cfg.get("model"):
+        env[preset["model_env"]] = cfg["model"]
+
+    def _sub(part: str) -> str:
+        return (part.replace("{PROMPT}", prompt)
+                    .replace("{MODEL}", cfg.get("model") or "")
+                    .replace("{TIMEOUT}", str(int(timeout))))
+
+    cmd = [cfg["cli_cmd"]] + [_sub(a) for a in list(preset["args"]) + list(preset.get("model_flag") or [])]
+
     if log:
-        log("🚀 Eksekusi CLI: %s -p <prompt %d chars> --output text --max-turns %s --time-limit %ds (cwd: temp)"
-            % (cfg["vibe_cmd"], len(prompt), VIBE_MAX_TURNS, int(timeout)))
-        log("🧠 Model aktif: %s (via VIBE_ACTIVE_MODEL)" % cfg["model"])
+        log("🚀 Eksekusi CLI: %s %s (cwd: temp)"
+            % (cfg["cli_cmd"], " ".join(a if a != prompt else "<prompt %d chars>" % len(prompt) for a in cmd[1:])))
+        log("🧠 Model aktif: %s" % (cfg.get("model") or "(default CLI)"))
 
     last_err = ""
     for attempt in range(1 + max(0, retries)):
@@ -407,11 +497,11 @@ def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
         try:
             reply, code, err_tail = _vibe_attempt(cmd, env, timeout, log)
         except FileNotFoundError as e:
-            raise ChatError("CLI `vibe` (%s) tidak bisa dijalankan: %s. "
-                            "Set MOBILE_AUDIT_VIBE_CMD ke path vibe atau install ulang."
-                            % (cfg["vibe_cmd"], e))
+            raise ChatError("CLI `%s` (%s) tidak bisa dijalankan: %s. "
+                            "Set %s ke path-nya atau install ulang."
+                            % (preset["bin"], cfg["cli_cmd"], e, preset.get("cmd_env")))
         if log:
-            log("⏱️ Proses vibe selesai: exit %s dalam %.1fs (jawaban: %d chars)"
+            log("⏱️ Proses CLI selesai: exit %s dalam %.1fs (jawaban: %d chars)"
                 % (code, time.time() - t0, len(reply)))
         if reply:
             if code != 0:
@@ -419,8 +509,12 @@ def _vibe_completion(messages: List[dict], cfg: Dict[str, Any],
             return reply
         last_err = "exit %s: %s" % (code, err_tail[:200] or "tanpa output")
 
-    raise ChatError("`vibe` gagal setelah %d percobaan: %s. Cek koneksi/model."
-                    % (1 + max(0, retries), last_err[:300]))
+    raise ChatError("`%s` gagal setelah %d percobaan: %s. Cek koneksi/model."
+                    % (preset["bin"], 1 + max(0, retries), last_err[:300]))
+
+
+# alias backward-compat (kode lama menyebut _vibe_completion)
+_vibe_completion = _cli_completion
 
 
 # ------------------------- HTTP provider (fallback opsional) -------------------------
@@ -474,8 +568,8 @@ def chat_completion(messages: List[dict], config: Optional[dict] = None,
             + ", ".join(cfg["missing_env"])
             + " (backend saat ini: " + cfg["provider"] + ")"
         )
-    if cfg["provider"] == "vibe":
-        return _vibe_completion(messages, cfg, log)
+    if "cli_preset" in cfg or cfg["provider"] in CLI_PRESETS:
+        return _cli_completion(messages, cfg, log)
     return _http_completion(messages, cfg, log)
 
 

@@ -1243,11 +1243,18 @@ async def api_verify_webhook(scan_id: int, request: Request):
 async def api_chat_config(scan_id: int):
     """Status konfigurasi provider LLM (tanpa membocorkan api key)."""
     cfg = get_llm_config()
+    available = []
+    try:
+        from chat import list_cli_providers
+        available = list_cli_providers()
+    except Exception:
+        available = []
     return JSONResponse({
         "provider": cfg["provider"],
         "model": cfg["model"],
         "configured": cfg["configured"],
         "missing_env": cfg["missing_env"],
+        "available_providers": available,
     })
 
 

@@ -61,7 +61,7 @@ for k in ("MOBILE_AUDIT_LLM_PROVIDER", "MOBILE_AUDIT_LLM_MODEL",
 cfg = chat.get_llm_config()
 assert cfg["provider"] == "vibe", cfg
 assert cfg["model"] == "glm-5-3", cfg
-assert cfg["configured"] == bool(chat._find_vibe_cmd()), cfg
+assert cfg["configured"] == bool(chat._find_cli_cmd("vibe")), cfg
 print("[3] get_llm_config (default vibe / glm-5-3) OK, configured =", cfg["configured"])
 
 # --- config: fallback mistral masih jalan ---
@@ -73,13 +73,28 @@ assert cfg["base_url"] == "https://api.mistral.ai/v1"
 assert cfg["model"] == "mistral-small-latest"
 print("[4] get_llm_config (fallback mistral) OK")
 
-# --- config: opencode ---
-os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = "opencode"
+# --- config: opencode_api (HTTP zen; "opencode" kini = CLI agent) ---
+os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = "opencode_api"
 os.environ["OPENCODE_API_KEY"] = "zen-key"
 os.environ["MOBILE_AUDIT_LLM_MODEL"] = "some-model"
 cfg = chat.get_llm_config()
-assert cfg["configured"] and cfg["provider"] == "opencode"
-print("[5] get_llm_config (fallback opencode) OK")
+assert cfg["configured"] and cfg["provider"] == "opencode_api", cfg
+print("[5] get_llm_config (fallback opencode_api HTTP) OK")
+
+# --- config: CLI presets (claude/gemini/codex/aider/opencode) ---
+for cli_name in ("claude", "gemini", "codex", "aider"):
+    os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = cli_name
+    os.environ["MOBILE_AUDIT_%s_CMD" % cli_name.upper()] = "fake-%s" % cli_name
+    cfg = chat.get_llm_config()
+    assert cfg["configured"] and cfg["provider"] == cli_name, cfg
+    assert cfg["cli_cmd"] == "fake-%s" % cli_name, cfg
+os.environ.pop("MOBILE_AUDIT_CLAUDE_CMD", None)
+os.environ.pop("MOBILE_AUDIT_GEMINI_CMD", None)
+os.environ.pop("MOBILE_AUDIT_CODEX_CMD", None)
+os.environ.pop("MOBILE_AUDIT_AIDER_CMD", None)
+print("[5b] get_llm_config CLI presets OK (claude/gemini/codex/aider)")
+
+
 
 # --- context builder: nilai secret UTUH (bantu validasi manual pentester) ---
 os.environ.pop("MOBILE_AUDIT_LLM_PROVIDER", None)
@@ -164,6 +179,28 @@ try:
 finally:
     chat.subprocess.Popen = real_popen
 print("[8b] vibe robust path OK (exit != 0 dengan jawaban -> jawaban dipakai)")
+
+# --- CLI preset: cmd builder (claude shape) — dilanjut setelah FakeProc didefinisikan ---
+os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = "claude"
+os.environ["MOBILE_AUDIT_CLAUDE_CMD"] = "vibe"  # biar configured (pakai mock Popen juga)
+os.environ["MOBILE_AUDIT_LLM_MODEL"] = "sonnet"
+captured2 = {}
+real_popen2 = chat.subprocess.Popen
+def fake_popen2(cmd, **kw):
+    captured2["cmd"] = cmd
+    captured2["env"] = kw.get("env", {})
+    return FakeProc(["jawaban claude\n"], [])
+chat.subprocess.Popen = fake_popen2
+try:
+    r3 = chat.ask_assistant({"rule_id": "x", "match": "m", "category": "c"}, None, [], "tes claude")
+finally:
+    chat.subprocess.Popen = real_popen2
+    os.environ.pop("MOBILE_AUDIT_CLAUDE_CMD", None)
+assert r3 == "jawaban claude", r3
+cmd2 = captured2["cmd"]
+assert cmd2[0] == "vibe" and "-p" in cmd2 and "--output-format" in cmd2 and "text" in cmd2, cmd2
+assert "--model" in cmd2 and "sonnet" in cmd2, cmd2
+print("[5c] CLI cmd builder claude OK (flag --model terpasang)")
 
 # --- HTTP fallback: dipatch requests.post biar tanpa network ---
 os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = "mistral"

@@ -57,7 +57,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 
 **Verification Assistant (AI):**
 - Default: vibe CLI lokal, model via `VIBE_ACTIVE_MODEL` (alias model di config vibe, mis. `glm-5-3`).
-- Fallback provider HTTP (opsional): `MOBILE_AUDIT_LLM_PROVIDER` = `mistral` | `opencode` | `custom`, plus `MOBILE_AUDIT_LLM_BASE_URL` / `MOBILE_AUDIT_LLM_API_KEY` / `MOBILE_AUDIT_LLM_MODEL`. Detail: [web/README.md](web/README.md).
+- **Multi-provider AI agent**: `MOBILE_AUDIT_LLM_PROVIDER` = `vibe` (default) | `claude` (Claude Code) | `opencode` | `gemini` (Gemini CLI) | `codex` (OpenAI Codex) | `aider` | HTTP: `mistral` | `opencode_api` | `custom`. Model per provider via `MOBILE_AUDIT_LLM_MODEL`, path binary via `MOBILE_AUDIT_<NAMA>_CMD`, timeout via `MOBILE_AUDIT_CLI_TIMEOUT`. Semua CLI agent dapat streaming live log + retry yang sama. Detail: [web/README.md](web/README.md).
 - **Validate with Agent**: dari Live Verifier, klik 🤖 → panel AI terbuka dan prompt validasi dibangun server-side (module + target utuh + evidence verifier + snippet kode); jawaban mengikuti format playbook (VERDICT/EVIDENCE/LATERAL MOVEMENT/SEVERITY/NEXT SAFE STEPS).
 - Skill markdown di `skills/*.md` otomatis dibaca (cache mtime, cap karakter) dan digabung ke system prompt.
 

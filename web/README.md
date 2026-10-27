@@ -378,11 +378,24 @@ Tidak ada env wajib. Opsional:
 
 ### Fallback Opsional (provider HTTP OpenAI-compatible)
 
-Set `MOBILE_AUDIT_LLM_PROVIDER` untuk memakai provider HTTP alih-alih vibe CLI:
+Set `MOBILE_AUDIT_LLM_PROVIDER` untuk memilih backend AI. **CLI agent** (pola sama dengan vibe: single-shot, streaming live log, auto-retry):
+
+| Provider | CLI | Default model | Path override |
+|---|---|---|---|
+| `vibe` (default) | `vibe` | `glm-5-3` | `MOBILE_AUDIT_VIBE_CMD` |
+| `claude` | Claude Code | `sonnet` | `MOBILE_AUDIT_CLAUDE_CMD` |
+| `opencode` | opencode CLI | (default opencode) | `MOBILE_AUDIT_OPENCODE_CMD` |
+| `gemini` | Gemini CLI | `gemini-2.5-pro` | `MOBILE_AUDIT_GEMINI_CMD` |
+| `codex` | Codex CLI | `gpt-5.1-codex` | `MOBILE_AUDIT_CODEX_CMD` |
+| `aider` | aider | (default aider) | `MOBILE_AUDIT_AIDER_CMD` |
+
+Timeout CLI: `MOBILE_AUDIT_CLI_TIMEOUT` (detik). Model: `MOBILE_AUDIT_LLM_MODEL`.
+
+**Provider HTTP** (OpenAI-compatible) — set `MOBILE_AUDIT_LLM_PROVIDER` untuk memakai provider HTTP alih-alih CLI:
 
 | Env | Keterangan |
 |-----|------------|
-| `MOBILE_AUDIT_LLM_PROVIDER` | `mistral`, `opencode`, atau `custom` |
+| `MOBILE_AUDIT_LLM_PROVIDER` | `mistral`, `opencode_api`, atau `custom` |
 | `MOBILE_AUDIT_LLM_BASE_URL` | Base URL OpenAI-compatible (mis. Ollama: `http://localhost:11434/v1`) |
 | `MOBILE_AUDIT_LLM_API_KEY` | API key (fallback: `MISTRAL_API_KEY` / `OPENCODE_API_KEY`) |
 | `MOBILE_AUDIT_LLM_MODEL` | Nama model |
@@ -397,7 +410,7 @@ rem model default: mistral-small-latest (ganti via MOBILE_AUDIT_LLM_MODEL jika m
 **OpenCode (Zen gateway):**
 ```bash
 set OPENCODE_API_KEY=xxxxx
-set MOBILE_AUDIT_LLM_PROVIDER=opencode
+set MOBILE_AUDIT_LLM_PROVIDER=opencode_api
 set MOBILE_AUDIT_LLM_MODEL=<model-yang-tersedia-di-akun-kamu>
 ```
 
