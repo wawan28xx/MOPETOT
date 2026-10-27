@@ -20,7 +20,8 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih satu temuan CRITICAL/HIGH atau **Validate Semua** (default) dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5. Semua hasil masuk ke **satu chat** (konsep ChatGPT): divider per temuan, badge verdict/severity inline, dan pentester bisa debat / mengarahkan ulang agent di percakapan yang sama (konteks otomatis nyambung ke temuan terakhir yang divalidasi).
 - **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, temuan + target, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
-- **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
+- **RASP Bypass Generator (Frida)**: seksi terpisah untuk Frida hook script — SSL pinning, root detection, biometric, crypto dumper (view/download).
+- **One-Click PoC & Exploit Generator**: ADB intent extras, deep link trigger, HTML exploit builder — terpisah dari RASP bypass.
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
 - Dashboard dengan riwayat scan, filter, pagination, perbandingan dua scan, log realtime.
 - Cache SQLite untuk hasil verifier dan PoC.

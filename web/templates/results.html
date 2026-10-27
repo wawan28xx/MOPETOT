@@ -1494,15 +1494,26 @@ function loadLiveVerifier() {
     html += '</div></div>';
 
     // ==========================================
-    // ⚡ AUTOMATED POC GENERATOR SECTION (TOP)
+    // 🛡️ RASP BYPASS (FRIDA) — seksi terpisah
+    // ==========================================
+    html += '<div class="section-block" style="border-left:4px solid #ff2d55; margin-bottom:24px;">';
+    html += '<div class="section-title-static" style="background:rgba(255,45,85,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">';
+    html += '<span style="color:#ff2d55; font-weight:800; font-size:16px;">🛡️ RASP Bypass Generator (Frida)</span>';
+    html += '<div style="display:flex; gap:8px;">';
+    html += '<button class="btn btn-sm btn-primary" onclick="openFridaModalDirect()" style="display:flex; align-items:center; gap:6px; border-color:#ff2d55;">💉 View Frida Bypass Script (.js)</button>';
+    html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
+    html += '</div></div>';
+    html += '<div class="section-content" id="rasp-bypass-container">';
+    html += '<p class="subtitle" style="margin-bottom:16px;">Frida hook script untuk melewati proteksi runtime target (SSL pinning, root detection, biometric, crypto dumper). Jalankan dengan: <code style="font-family:var(--font-mono); color:#00f0ff;">frida -U -f [package] -l bypass_hooks.js</code></p>';
+    html += '</div></div>';
+
+    // ==========================================
+    // ⚡ ONE-CLICK POC & EXPLOIT GENERATOR — seksi terpisah
     // ==========================================
     html += '<div class="section-block" style="border-left:4px solid var(--accent); margin-bottom:24px;">';
     html += '<div class="section-title-static" style="background:rgba(59,130,246,0.1); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">';
-    html += '<span style="color:var(--accent); font-weight:800; font-size:16px;">⚡ Automated PoC &amp; Exploit Generator (One-Click)</span>';
-    html += '<div style="display:flex; gap:8px;">';
-    html += '<button class="btn btn-sm btn-primary" onclick="openFridaModalDirect()" style="display:flex; align-items:center; gap:6px;">💉 View Frida Bypass Script (.js)</button>';
-    html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
-    html += '</div></div>';
+    html += '<span style="color:var(--accent); font-weight:800; font-size:16px;">⚡ One-Click PoC &amp; Exploit Generator</span>';
+    html += '</div>';
     html += '<div class="section-content" id="poc-generator-container">';
     html += '<p class="subtitle" style="margin-bottom:16px;">Script pembuktian konsep (Proof-of-Concept) siap pakai yang di-generate langsung dari temuan Manifest, DeepLink, dan IPC:</p>';
     html += '<div id="poc-cards-dynamic"></div>';
