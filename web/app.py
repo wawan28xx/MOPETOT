@@ -1651,10 +1651,24 @@ async def api_get_frida_script(scan_id: int):
         findings = await get_findings(db, scan_id)
         
         pkg_name = (manifest and manifest["package_name"]) or scan["package_name"] or "com.target.app"
-        rasp_info = scan["rasp"] or "" if "rasp" in scan.keys() else ""
-        
+
+        # RASP-aware: baca hasil deteksi RASP + frameworks dari findings.json
+        # (tabel scans tidak punya kolom rasp — scanner menyimpannya di meta)
+        rasp_info = ""
+        frameworks = []
+        try:
+            fj = (RESULTS_DIR / str(scan_id) / "findings.json")
+            data = json.loads(fj.read_text(encoding="utf-8"))
+            meta = data.get("meta") or {}
+            rasp_info = str(meta.get("rasp") or "")
+            frameworks = list(data.get("frameworks") or [])
+            if meta.get("package"):
+                pkg_name = meta["package"] or pkg_name
+        except Exception:
+            pass
+
         poc_engine = PoCEngine()
-        frida_code = poc_engine.generate_frida_bypass_script(pkg_name, [dict(f) for f in findings], rasp_info)
+        frida_code = poc_engine.generate_frida_bypass_script(pkg_name, [dict(f) for f in findings], rasp_info, frameworks)
         
         return PlainTextResponse(frida_code, headers={
             "Content-Disposition": f'attachment; filename="bypass_hooks_{scan_id}.js"'
