@@ -14,6 +14,7 @@ Fallback opsional (provider HTTP OpenAI-compatible) via env:
 PENTING: nilai secret diberikan UTUH (tanpa masking) ke provider — ini memang
 dibutuhkan pentester untuk validasi manual pada audit berizin.
 """
+import json
 import os
 import re
 import shutil
@@ -607,3 +608,51 @@ def ask_assistant(secret: dict, verifier_rows: Optional[List[dict]],
     if log:
         log("🧾 Total prompt: %d pesan, %d chars" % (len(messages), sum(len(m["content"]) for m in messages)))
     return chat_completion(messages, config, log)
+
+
+# ---------------- Persistensi pilihan provider (dropdown UI) ----------------
+# Pilihan provider/model dari UI disimpan di llm_settings.json supaya
+# tetap aktif setelah restart server. Env tetap dihormati sebagai fallback.
+LLM_SETTINGS_FILE = Path(__file__).resolve().parent / "llm_settings.json"
+
+
+def load_llm_settings() -> None:
+    """Muat provider/model tersimpan ke env saat startup (env belum diset)."""
+    try:
+        d = json.loads(LLM_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print("[warn] gagal baca llm_settings.json: %s" % e, flush=True)
+        return
+    if d.get("provider") and not (os.environ.get("MOBILE_AUDIT_LLM_PROVIDER") or "").strip():
+        os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = str(d["provider"])
+    if d.get("model") and not (os.environ.get("MOBILE_AUDIT_LLM_MODEL") or "").strip():
+        os.environ["MOBILE_AUDIT_LLM_MODEL"] = str(d["model"])
+
+
+def save_llm_settings(provider: str, model: str = "") -> None:
+    """Simpan pilihan provider/model dari UI."""
+    try:
+        LLM_SETTINGS_FILE.write_text(
+            json.dumps({"provider": provider, "model": model or ""}, indent=2),
+            encoding="utf-8")
+    except Exception as e:
+        print("[warn] gagal simpan llm_settings.json: %s" % e, flush=True)
+
+
+def set_active_provider(provider: str, model: str = "") -> Dict[str, Any]:
+    """Ganti provider aktif runtime (dipakai endpoint dropdown UI)."""
+    provider = (provider or "").strip().lower()
+    if provider not in CLI_PRESETS and provider not in HTTP_PRESETS and provider != "custom":
+        raise ValueError("Provider tidak dikenal: %r (pilih dari CLI_PRESETS/HTTP_PRESETS)" % provider)
+    os.environ["MOBILE_AUDIT_LLM_PROVIDER"] = provider
+    if (model or "").strip():
+        os.environ["MOBILE_AUDIT_LLM_MODEL"] = model.strip()
+    cfg = get_llm_config()
+    if not cfg["configured"]:
+        # jangan persist kalau tidak siap — biarkan missing_env dibaca UI
+        raise RuntimeError("; ".join(cfg["missing_env"]) or "provider belum configured")
+    save_llm_settings(provider, cfg.get("model") or "")
+    return cfg
+
+
+load_llm_settings()

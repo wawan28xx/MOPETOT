@@ -1258,6 +1258,47 @@ async def api_chat_config(scan_id: int):
     })
 
 
+@app.get("/api/chat/ai/provider")
+async def api_ai_provider_get():
+    """Provider AI aktif + inventory (untuk dropdown UI)."""
+    cfg = get_llm_config()
+    try:
+        from chat import list_cli_providers
+        cli = list_cli_providers()
+    except Exception:
+        cli = []
+    return JSONResponse({
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "configured": cfg["configured"],
+        "missing_env": cfg["missing_env"],
+        "cli_providers": cli,
+    })
+
+
+@app.post("/api/chat/ai/provider")
+async def api_ai_provider_set(request: Request):
+    """Ganti provider AI aktif runtime (dropdown UI) + persist."""
+    from chat import set_active_provider
+    data = await request.json()
+    provider = (data.get("provider") or "").strip()
+    model = (data.get("model") or "").strip()
+    if not provider:
+        raise HTTPException(400, "provider is required")
+    try:
+        cfg = await asyncio.to_thread(set_active_provider, provider, model)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse({
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "configured": cfg["configured"],
+        "missing_env": cfg["missing_env"],
+    })
+
+
 @app.get("/api/scan/{scan_id}/chat/history")
 async def api_chat_history(scan_id: int, secret_id: int = None):
     db = await get_db()

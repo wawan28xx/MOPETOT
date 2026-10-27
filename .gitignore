@@ -39,3 +39,4 @@ web/.env
 
 # Local scratch/frida scripts (user-local, jangan di-push)
 tmp/
+llm_settings.json

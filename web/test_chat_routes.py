@@ -7,8 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import app  # noqa: F401
 
 routes = sorted(r.path for r in app.app.routes if "chat" in getattr(r, "path", ""))
-# /chat/history punya 2 entri (GET + DELETE)
+# /chat/history punya 2 entri (GET + DELETE); /api/chat/ai/provider GET+POST
 assert routes == [
+    "/api/chat/ai/provider",
+    "/api/chat/ai/provider",
     "/api/scan/{scan_id}/chat",
     "/api/scan/{scan_id}/chat/agent",
     "/api/scan/{scan_id}/chat/agent/{job_id}",

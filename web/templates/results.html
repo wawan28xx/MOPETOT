@@ -232,10 +232,16 @@
         <div class="h-9 w-9 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/30 to-indigo-600/30 border border-purple-400/30 text-lg shrink-0">🤖</div>
         <div class="flex-1 min-w-0">
             <div class="text-[13px] font-bold text-[var(--text-primary)] leading-tight truncate">Verification Assistant</div>
-            <span id="chat-status-chip"
-                  class="inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border
-                         border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)]
-                         max-w-full truncate align-middle">● memuat konfigurasi...</span>
+            <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <span id="chat-status-chip"
+                      class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border
+                             border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)]
+                             max-w-full truncate align-middle">● memuat konfigurasi...</span>
+                <select id="chat-provider-select" onchange="switchAiProvider(this.value)" title="Ganti backend AI"
+                        class="text-[10px] font-bold rounded-full px-2 py-0.5 cursor-pointer
+                               bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)]
+                               focus:outline-none focus:border-purple-400 max-w-[150px] truncate"></select>
+            </div>
         </div>
         <button onclick="toggleAssistant()" title="Tutup"
                 class="shrink-0 h-8 w-8 flex items-center justify-center rounded-lg text-lg leading-none cursor-pointer
@@ -1796,16 +1802,70 @@ function fetchAssistantConfig() {
         .then(function(r) { return r.json(); })
         .then(function(cfg) {
             const chip = document.getElementById('chat-status-chip');
-            if (!chip) return;
-            if (cfg.configured) {
-                chip.innerText = '● ' + cfg.provider + ' / ' + cfg.model;
-                chip.className = CHAT_CHIP_OK;
-            } else {
-                chip.innerText = '● OFFLINE — set env: ' + (cfg.missing_env || []).join(', ');
-                chip.className = CHAT_CHIP_ERR;
+            if (chip) {
+                if (cfg.configured) {
+                    chip.innerText = '● ' + cfg.provider + ' / ' + cfg.model;
+                    chip.className = CHAT_CHIP_OK;
+                } else {
+                    chip.innerText = '● OFFLINE — set env: ' + (cfg.missing_env || []).join(', ');
+                    chip.className = CHAT_CHIP_ERR;
+                }
             }
+            renderProviderSelect(cfg);
         })
         .catch(function() {});
+}
+
+function renderProviderSelect(cfg) {
+    const sel = document.getElementById('chat-provider-select');
+    if (!sel || !cfg) return;
+    let opts = '';
+    (cfg.available_providers || []).forEach(function(p) {
+        const disabled = p.found ? '' : ' disabled';
+        const mark = p.found ? '' : ' (belum di-install)';
+        const selected = p.name === cfg.provider ? ' selected' : '';
+        opts += '<option value="' + escHtml(p.name) + '"' + selected + disabled + '>'
+                + escHtml(p.label) + escHtml(mark) + '</option>';
+    });
+    // provider HTTP aktif (mistral/opencode_api/custom) — tampil bila dipakai
+    if (cfg.provider && !(cfg.available_providers || []).some(function(p) { return p.name === cfg.provider; })) {
+        opts += '<option value="' + escHtml(cfg.provider) + '" selected>' + escHtml(cfg.provider) + ' (HTTP aktif)</option>';
+    }
+    sel.innerHTML = opts;
+    if (cfg.configured) {
+        sel.style.borderColor = 'rgba(34,197,94,0.4)';
+    } else {
+        sel.style.borderColor = 'rgba(239,68,68,0.5)';
+    }
+}
+
+function switchAiProvider(name) {
+    if (!name) return;
+    const chip = document.getElementById('chat-status-chip');
+    if (chip) {
+        chip.innerText = '● mengganti ke ' + name + '...';
+        chip.className = 'inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-muted)] max-w-full truncate align-middle';
+    }
+    fetch('/api/chat/ai/provider', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ provider: name })
+    })
+    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+    .then(function(out) {
+        if (out.ok && out.j.configured) {
+            fetchAssistantConfig(); // refresh chip + select
+        } else {
+            // gagal (CLI tidak ada / key kosong) — balikin select ke provider aktif
+            fetchAssistantConfig();
+            const chip2 = document.getElementById('chat-status-chip');
+            if (chip2) {
+                chip2.innerText = '● GAGAL ganti: ' + ((out.j && (out.j.detail || out.j.error)) || 'provider belum siap');
+                chip2.className = CHAT_CHIP_ERR;
+            }
+        }
+    })
+    .catch(function() { fetchAssistantConfig(); });
 }
 
 function onAssistantFindingChange() {
