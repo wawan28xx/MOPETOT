@@ -484,7 +484,7 @@ def write_report(outdir: Path, target: Path, ctype, frameworks, findings, stats,
     meta = meta or {}
 
     md = []
-    md.append(f"# Mobile Audit Report — {target.name}\n")
+    md.append(f"# Mopetot Report — {target.name}\n")
     md.append(f"- Target: `{target}`")
     md.append(f"- Tipe: `{ctype}`")
     md.append(f"- Framework: {', '.join(frameworks.values()) if isinstance(frameworks, dict) else frameworks}")

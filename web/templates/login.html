@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Mopetot</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/cyberpunk.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Layout login full-screen ala cyberpunk: grid + scanline sudah dari cyberpunk.css (body) */
+        .login-shell {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            position: relative;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 400px;
+            background: rgba(18, 8, 37, 0.92);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 36px 32px 28px;
+            position: relative;
+            clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+            box-shadow: 0 0 24px rgba(0, 240, 255, 0.12), 0 0 64px rgba(0, 0, 0, 0.7);
+        }
+        .login-card::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent), var(--magenta-neon), transparent);
+        }
+        .login-label {
+            display: block;
+            font-family: var(--font-display);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .login-input {
+            width: 100%;
+            background: #02000a;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            margin-bottom: 16px;
+            transition: all 150ms var(--ease-snap);
+        }
+        .login-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: var(--glow-cyan);
+        }
+        .login-error {
+            border: 1px solid var(--red-neon);
+            background: rgba(255, 0, 60, 0.1);
+            color: #ff2b4d;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            margin-bottom: 16px;
+            text-shadow: 0 0 8px rgba(255, 0, 60, 0.5);
+        }
+        .login-btn {
+            width: 100%;
+            padding: 12px 0;
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            font-family: var(--font-display);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: var(--radius);
+            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+            box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.15), 0 0 10px rgba(0, 240, 255, 0.25);
+            transition: all 150ms var(--ease-snap);
+        }
+        .login-btn:hover {
+            background: rgba(0, 240, 255, 0.12);
+            box-shadow: var(--glow-cyan);
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.8);
+        }
+        .login-foot {
+            margin-top: 20px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .login-foot b { color: var(--accent); font-weight: 400; }
+    </style>
+</head>
+<body>
+    <div class="login-shell">
+        <!-- BGM: mulai saat tombol Jack In dipencet (user gesture) -->
+        <audio id="bgm" loop preload="auto" src="/static/audio/nightcity-loop.wav"></audio>
+        <form class="login-card" method="post" action="/login" autocomplete="off" onsubmit="mpMusicStart()">
+            <!-- LOGO MOPETOT (font Cyberpunk) -->
+            <div style="display:flex; justify-content:center; align-items:baseline; gap:7px; margin-bottom:6px;">
+                <span class="cp-logo-word"><span class="cp-logo-big">M</span><span class="cp-logo-rest">OPETOT</span></span>
+                <span class="cp-logo-ver">v1.0</span>
+            </div>
+            <p class="login-foot" style="margin:0 0 26px 0;"><b>//</b> NIGHT CITY AUDIT OS <b>//</b> AUTHENTICATION REQUIRED</p>
+
+            {% if error %}
+            <div class="login-error">&#9888; {{ error }}</div>
+            {% endif %}
+
+            <label class="login-label" for="username">Operator ID</label>
+            <input class="login-input" type="text" id="username" name="username" placeholder="mopetot" autofocus required>
+
+            <label class="login-label" for="password">Access Key</label>
+            <input class="login-input" type="password" id="password" name="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" required>
+
+            <button class="login-btn" type="submit">&#9654; Jack In</button>
+
+            <p class="login-foot"><b>//</b> SESSION TTL 12 JAM · RESTART SERVER = LOGIN ULANG</p>
+        </form>
+    </div>
+    <script src="/static/js/city-bg.js"></script>
+    <script src="/static/js/bgm.js"></script>
+</body>
+</html>

@@ -263,3 +263,159 @@ Apakah rencana bertahap ini sudah cocok:
 2. Fase 2: Buat generator template Frida Bypass Script serbaguna (Root, SSL Pinning, Biometric, Crypto Hook) + tombol download/copy di UI.
 3. Fase 3: Buat generator HTML Webview PoC dan Python Logcat PoC.
 4. Fase 4: Siapkan arsitektur konektor modular untuk LLM gratis (Gemini / Groq / Ollama) untuk Fase E nanti.
+
+
+===============================================================================
+ UPDATE 27-10-2026 — HASIL SESI PENGEMBANGAN + BRAINSTORMING (MOPETOT)
+ Tools sekarang: MOPETOT (rebrand dari Mobile Audit Tool, tema retro cyberpunk)
+===============================================================================
+
+A. YANG SUDAH SELESAI DI SESI INI (jangan dikerjakan ulang)
+--------------------------------------------------------------------------------
+1.  Removal fitur PII Rekening/Kartu (credit_card_number, bank_account_number) &
+    NIK (idn_nik_ktp) — rule dihapus dari rules/secrets.json + 13.786 row lama
+    dibersihkan dari DB.
+2.  Verification Assistant (AI chatbox) — SUDAH JALAN:
+    - Floating split-view panel (ala Gemini side panel di Chrome), Tailwind.
+    - Backend AI: vibe CLI lokal single-line command (vibe -p "..." --output text),
+      model alias glm-5-3 via env VIBE_ACTIVE_MODEL; fallback provider HTTP
+      (Mistral / OpenCode / custom OpenAI-compatible).
+    - Secret selalu TER-MASK sebelum keluar (mask_secret), riwayat chat per-temuan
+      di tabel chat_history (SQLite).
+    - Tombol per-finding "Tanya AI" (magenta) + "Explorer" (cyan) di tab Secrets.
+3.  Code Explorer (tab 8) — SUDAH JALAN:
+    - Browser corpus ala VS Code (editor #1e1e1e, sidebar #252526, status bar
+      #007acc), syntax highlighting via highlight.js theme vs2015 (fallback
+      tokenizer internal).
+    - File tree lazy per-direktori (skalabel corpus 183k+ file), filter nama file
+      global via ripgrep.
+    - Grep corpus: engine chain ripgrep (VENDORED bin/ripgrep/rg.exe) -> GNU grep
+      -> Python. Popup hasil grep ala jadx-gui search (dialog tengah), popup
+      find-in-file ala Ctrl+F (Enter/Shift+Enter/F3, counter i/N).
+    - Fix kritis: _make_rel cache prefix (filter nama file dari >90s -> 0.78s).
+4.  iOS: Deteksi binary terenkripsi FairPlay (cryptid) — SUDAH JALAN:
+    - Parser Mach-O pure-Python (32/64-bit, LE/BE, fat/universal multi-slice).
+    - Finding ios_fairplay_encrypted masuk report + Web UI; jalur single Mach-O
+      file juga jalan.
+    - Bonus bug fix: deteksi executable utama IPA (PkgInfo pernah dianggap
+      executable utama) + classify() sekarang mengenali mach_o_le (dulu unknown).
+5.  Rule PEM dirapatkan: header wajib diikuti body base64 minimal 32 char
+   (rsa/ec/dsa/openssh/pgp/gcp_sa/certificate) — 154 false positive header
+   PEM dari label string binary dibersihkan. Regression: test_pem_rules.py.
+6.  Redesign UI retro cyberpunk (adaptasi github.com/rintran720/cyberpunk-ui):
+    - web/static/css/cyberpunk.css (token override + design system cp-*):
+      neon cyan/magenta/yellow, surface #05010a, scanline CRT overlay, grid bg,
+      glow, corner-cut, glitch heading, ticker marquee, scrollbar neon.
+    - Rebrand: MOPETOT — logo wordmark font "Cyberpunk" asli (Lyon ArtZ, vendored
+      di web/static/fonts/, free for personal use — CEK LISENSI sebelum push
+      GitHub publik), huruf M besar + glitch animation, versi cyan v1.0.
+7.  Vendored: bin/ripgrep/rg.exe (grep engine Code Explorer).
+8.  Backup DB tersedia: web/database/mobile_audit.db.bak (hapus manual kalau
+    sudah yakin, menghemat ~100MB).
+
+B. WORKLIST BESOK — URUTAN EKSEKUSI (PRIORITAS + ESTIMASI)
+--------------------------------------------------------------------------------
+[P0] 1. KEAMANAN TOOLS-nya SENDIRI (30 menit, dampak terbesar)
+   - app.py: uvicorn masih bind 0.0.0.0 TANPA AUTH -> ubah ke 127.0.0.1
+     + tambah token auth sederhana (API key header). Data temuan = data klien!
+   - requirements.txt: pin "starlette<0.41" (pernah mismatch dengan FastAPI 0.115
+     -> app gagal start sama sekali).
+
+[P0] 2. SETUP AGENT AUTO-PROVISIONING (setengah hari) — keputusan brainstorming:
+   - JANGAN vendor vibe/Node di repo (repo sudah besar, versi cepat basi).
+   - BUAT: setup.py bootstrap (dipanggil run.bat saat first-run):
+     a) pip install -r web/requirements.txt
+     b) cek vibe di PATH -> jika tidak ada: buat venv web/.agents-venv (GITIGNORE)
+        lalu pip install mistral-vibe
+     c) opsional: download opencode.exe (single binary) ke bin/opencode/
+     d) generate web/.env (gitignored): MOBILE_AUDIT_VIBE_CMD=<venv>/Scripts/vibe.exe
+     e) print status + instruksi set API key
+   - UI chip Verification Assistant: jika vibe tidak ketemu -> tampilkan instruksi
+     "jalankan: python setup.py" (JANGAN execute install dari web server).
+   - Flag --pin utk reproducibility audit klien; default float (latest).
+   - chat.py SUDAH membaca MOBILE_AUDIT_VIBE_CMD -> infra siap, tinggal wiring.
+
+[P1] 3. LOGIC DEEP LINK PoC — hasil validasi (true positive rate tinggi tapi
+   yang false positive mahal buat hunter):
+   - Filter deep link hanya dari komponen exported=true (non-exported -> am start
+     kena Permission Denial = PoC tidak bisa dieksploitasi).
+   - Rekam flag BROWSABLE per scheme (HTML PoC redirect hanya valid jika ada
+     category BROWSABLE).
+   - Tambah "-p <package>" di ADB command (deterministik + sekaligus verifikasi
+     handler scheme).
+   - Param uji "?url=https://attacker.com/..." yang di-append otomatis = tebakan
+     -> label "payload uji coba", bukan command utama.
+   - Pisahkan app-links http/https dari custom scheme di tabel PoC.
+   - Guard DB: UNIQUE(scan_id) di manifest_info (stale row bisa muncul jika
+     scan di-rerun).
+
+[P1] 4. CROSS-APP SECRET REUSE DETECTOR (1-2 hari — fitur unik, nilai jual
+   korporat): query "secret ini muncul di app klien lain mana aja?" — hash
+   match di tabel secrets lintas scan.
+
+[P2] 5. iOS lanjutan:
+   - Parse embedded.mobileprovision (sekarang justru di-exclude!) — entitlements,
+     team ID, device list, expiry (via openssl CMS atau plist XML di dalamnya).
+   - Swift symbol demangling (mangled _$s... -> nama class/fungsi asli).
+   - Deteksi source map (.js.map / sourceMappingURL) RN/Cordova/Capacitor —
+     sering menemukan source code asli.
+[P2] 6. SAST rules tambahan (port pattern YAML dari DLH): AES/ECB, hardcoded IV,
+   ALLOW_ALL_HOSTNAME_VERIFIER, java.util.Random utk token, FLAG_MUTABLE
+   PendingIntent.
+[P2] 7. Badge OWASP MASVS per temuan (mapping JSON + 1 kolom DB) + triage
+   status per finding (False Positive / Verified / Needs Test -> SQLite).
+[P2] 8. Export SARIF/JSON + template laporan bug bounty (gap E lama).
+[P2] 9. APK signature analysis v1/v2/v3/v3.1 (fingerprint, key rotation) —
+   bisa via REA inspect_apk_signature (lihat C) atau implementasi sendiri.
+[P2] 10. JNI mapping table: native method Java (jadx) <-> exported symbol
+   Java_com_... di .so -> hunter tahu library mana dibuka di Ghidra.
+[P2] 11. Deteksi asset terenkripsi (SQLite header bukan "SQLite format 3",
+   blob custom) -> flag "butuh runtime dump".
+[P3] 12. Repackaging helper offline (apktool b + apksigner, injeksi Frida
+   gadget / patch manifest exported=true).
+[P3] 13. Version corpus diff (manifest + smali yang berubah antar 2 versi APK).
+[P3] 14. IL2CPP Windows game: GameAssembly.dll (native PE) -> route ke
+   Il2CppDumper (tool sudah ada di bin/, tinggal dispatch PE->unity_engine).
+[P3] 15. Upload retention job (web/uploads sudah 2.3GB) — auto-purge >30 hari
+   + tombol bulk delete di history.
+
+C. INTEGRASI REA (github.com/morluto/rea) — KESIMPULAN ANALISIS (tunda, jangan
+   sekarang)
+--------------------------------------------------------------------------------
+- REA = MCP server + CLI + skill, TypeScript/Node 22+, MIT, evidence-first.
+- JANGAN lewat jalur MCP-vibe utk Verification Assistant (chat.py jalanin
+  vibe -p mode no-tools + cwd netral; mengizinkan tool REA = buka tool-call
+  agent -> merusak desain deterministik).
+- JALUR YANG COCOK: CLI (rea analyze-... --json) sebagai engine tambahan di
+  pipeline Mopetot — pola sama seperti ripgrep (subprocess, parse JSON ke
+  findings). Kandidat fitur pertama: inspect_apk_signature + static .NET
+  (menggantikan ketergantungan ilspycmd).
+- Butuh Node 22+ -> provisioning via setup.py --with-rea (jangan vendor Node).
+- Skill REA (.agents/skills/reverse-engineer-anything/SKILL.md, 509 baris):
+  JANGAN inject mentah (70% isinya instruksi recovery MCP yang tidak relevan
+  tanpa koneksi MCP). Ekstrak bagian metodologi investigasi + konsep
+  "setiap temuan bawa evidence + limitations" saja.
+- Konsep evidence-first layak diadopsi ke report generator Mopetot.
+
+D. SKILL FOLDER utk Verification Assistant (tunda — sesuai keputusan "tahan
+   dulu terkait skillnya, fokus offline")
+--------------------------------------------------------------------------------
+- Desain sudah final & disetujui: folder skills/ (di-push ke GitHub) ->
+  chat.py baca semua skills/*.md saat load -> concat ke SYSTEM_PROMPT (cap
+  ~8k karakter, cache per-session).
+- Skill pertama yang diusulkan: REA.md — playbook: metodologi analisis
+  per-tipe temuan, severity mapping P1-P5, template jawaban & draft laporan,
+  terminologi tools (corpus, Live Verifier, dsb).
+- Zero-config utk user lain: clone repo -> AI langsung "paham" ilmunya.
+
+E. CATATAN TEKNIS PENTING BESOK
+--------------------------------------------------------------------------------
+- Server HARUS di-restart tiap ada perubahan app.py/chat.py/code_explorer.py
+  (tidak ada hot-reload). Dev alternative: uvicorn app:app --reload.
+- Font "Cyberpunk" (logo) free for personal use — keputusan vendor/atribusi
+  sebelum push GitHub publik.
+- web/database/mobile_audit.db.bak bisa dihapus setelah yakin.
+- Test suite sebelum push: test_cryptid.py, test_pem_rules.py,
+  web/test_code_explorer.py, web/test_chat_assistant.py, web/test_chat_routes.py,
+  web/test_node_syntax.py, web/test_hljs_pipeline.js, web/test_syntax_highlight.js.
+- Git: backup snapshot commit 23e02dc (sebelum tema cyberpunk) — restore point.

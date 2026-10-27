@@ -3,16 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Mobile Audit Tool{% endblock %}</title>
+    <title>{% block title %}Mopetot{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/cyberpunk.css">
+    <!-- Fonts: cyberpunk theme (Orbitron display / Rajdhani body / JetBrains Mono) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
 </head>
 <body>
+    <!-- NAVBAR -->
     <nav class="navbar">
         <div class="nav-brand">
-            <a href="/">
-                <span class="logo">&#9760;</span> Mobile Audit Tool
+            <a href="/" class="cp-logo" title="Mopetot — Mobile Pentest Suite">
+                <span class="cp-logo-word"><span class="cp-logo-big">M</span><span class="cp-logo-rest">OPETOT</span></span>
+                <span class="cp-logo-ver">v1.0</span>
             </a>
         </div>
         <div class="nav-links">
@@ -20,15 +27,37 @@
             <a href="/upload" class="nav-link">Upload</a>
             <a href="/history" class="nav-link">History</a>
             <a href="/compare" class="nav-link">Compare</a>
+            <a href="/logout" class="nav-link" title="Keluar">&#9211; Jack Out</a>
+            <button type="button" id="bgm-toggle" onclick="mpToggleMusic()" title="Musik Night City"
+                    class="nav-link inline-flex items-center justify-center w-7 h-7 !px-0 !py-0 !border-none !bg-transparent cursor-pointer transition-all">
+                <svg class="bgm-eq" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                    <rect class="bgm-bar b1" x="1"  y="1" width="2.5" height="12" rx="0.4"/>
+                    <rect class="bgm-bar b2" x="5.25" y="1" width="2.5" height="12" rx="0.4"/>
+                    <rect class="bgm-bar b3" x="9.5" y="1" width="2.5" height="12" rx="0.4"/>
+                </svg>
+            </button>
         </div>
         <div class="nav-search">
-            <input type="text" id="global-search" placeholder="Search findings..." 
+            <input type="text" id="global-search" placeholder="search_findings..."
                    hx-get="/api/search"
                    hx-trigger="keyup changed delay:300ms"
                    hx-target="#search-results"
                    hx-vals="js:{q: document.getElementById('global-search').value}">
         </div>
     </nav>
+
+    <!-- STATUS TICKER (ala cyberpunk-ui) -->
+    <div class="cp-ticker" aria-hidden="true">
+        <div class="cp-ticker__track">
+            <span><b>//</b> NIGHT CITY AUDIT OS</span>
+            <span>ALL PACKETS NOMINAL</span>
+            <span><b>//</b> STATIC ANALYSIS READY</span>
+            <span>LIVE VERIFIER ARMED</span>
+            <span><b>//</b> CORPUS INDEXED</span>
+            <span>SECRETS SCANNER ONLINE</span>
+            <span><b>//</b> DECRYPTION KEYS ON STANDBY</span>
+        </div>
+    </div>
 
     <div id="search-results" class="search-dropdown" style="display:none;"></div>
 
@@ -37,9 +66,13 @@
     </main>
 
     <footer class="footer">
-        <p>Mobile Audit Tool v1.0 | Built for Bug Bounty Hunters</p>
+        <p>Mopetot v1.0 | Built for Bug Bounty Hunters</p>
     </footer>
 
+    <!-- BGM: Night City synthwave loop (mulai via tombol navbar atau tombol apa pun) -->
+    <audio id="bgm" loop preload="auto" src="/static/audio/nightcity-loop.wav"></audio>
+    <script src="/static/js/city-bg.js"></script>
+    <script src="/static/js/bgm.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

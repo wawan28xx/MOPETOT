@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Results #{{ scan.id }} - Mobile Audit Tool{% endblock %}
+{% block title %}Results #{{ scan.id }} - Mopetot{% endblock %}
 {% block content %}
 <div class="results-page">
     <div class="results-header">
@@ -776,6 +776,37 @@ function loadOverview() {
 
     html += '</div></div>'; // end binary-meta-box
 
+    // 1b. VERSI APLIKASI & SDK (ala sisik.eu/apk-tool)
+    const ANDROID_API_NAMES = {21:'5.0 Lollipop',22:'5.1 Lollipop',23:'6.0 Marshmallow',24:'7.0 Nougat',25:'7.1 Nougat',
+        26:'8.0 Oreo',27:'8.1 Oreo',28:'9.0 Pie',29:'10',30:'11',31:'12',32:'12L',33:'13',34:'14',35:'15',36:'16'};
+    function androidName(v) {
+        const n = parseInt(v);
+        return (n && ANDROID_API_NAMES[n]) ? 'Android ' + ANDROID_API_NAMES[n] : '';
+    }
+    const isIOS = (data.platform === 'ios');
+    const verName = (m.version_name || data.version || '') || '—';
+    const verCode = m.version_code || '—';
+    const minSdkVal = m.min_sdk || '—';
+    const targetSdkVal = m.target_sdk || '—';
+    const minSdkName = isIOS ? ('iOS ' + minSdkVal) : androidName(minSdkVal);
+    const targetSdkName = isIOS ? '' : androidName(targetSdkVal);
+
+    html += '<div class="mp-ver-strip">';
+    html += '<div class="mp-ver-main">';
+    html += '<span class="mp-ver-label">VERSION</span>';
+    html += '<span class="mp-ver-big">' + escHtml(verName) + '</span>';
+    html += '<span class="mp-ver-code">versionCode ' + escHtml(String(verCode)) + '</span>';
+    html += '</div>';
+    html += '<div class="mp-ver-tile"><span class="mp-ver-tile-label">PLATFORM</span><span class="mp-ver-tile-value">' + escHtml((data.platform || 'android').toUpperCase()) + '</span></div>';
+    html += '<div class="mp-ver-tile"><span class="mp-ver-tile-label">' + (isIOS ? 'MINIMUM iOS' : 'MIN SDK') + '</span><span class="mp-ver-tile-value">API ' + escHtml(String(minSdkVal)) + '</span>' +
+            (minSdkName ? '<span class="mp-ver-tile-sub">' + escHtml(minSdkName) + '</span>' : '') + '</div>';
+    if (!isIOS) {
+        html += '<div class="mp-ver-tile"><span class="mp-ver-tile-label">TARGET SDK</span><span class="mp-ver-tile-value">API ' + escHtml(String(targetSdkVal)) + '</span>' +
+                (targetSdkName ? '<span class="mp-ver-tile-sub">' + escHtml(targetSdkName) + '</span>' : '') + '</div>';
+    }
+    html += '<div class="mp-ver-tile"><span class="mp-ver-tile-label">FILENAME</span><span class="mp-ver-tile-value" style="font-size:11px;">' + escHtml((data.filename || '—').substring(0, 42)) + '</span></div>';
+    html += '</div>';
+
     // 2. Scorecard Grade Calculation
     const critCount = globalSecrets.filter(s => (s.severity||'').toLowerCase() === 'critical').length +
                       globalFindings.filter(f => (f.severity||'').toLowerCase() === 'critical').length;
@@ -1097,9 +1128,10 @@ function renderSecretsTable() {
         html += '<tr class="secret-row">';
         html += '<td>' + sevBadge(sev) + '</td>';
         html += '<td><span class="rule-chip">' + escHtml(rule) + '</span><br><span class="cat-label">' + escHtml(cat) + '</span>' + piiBadgeHtml +
-                (s.id ? '<br><span style="white-space:nowrap;">' +
-                    '<button class="btn-chat-assist" onclick="openInCodeExplorer(\'' + escJs(s.file_path || '') + '\',' + (parseInt(line) || 0) + ')" title="Buka file di Code Explorer">📂 Explorer</button> ' +
-                    '<button class="btn-chat-assist" onclick="openAssistantWithFinding(' + s.id + ')" title="Tanya Verification Assistant tentang temuan ini">🤖 Tanya AI</button></span>' : '') + '</td>';
+                (s.id ? '<span class="flex flex-wrap gap-1.5 mt-1.5">' +
+                    '<button class="inline-flex items-center gap-1 px-2 py-[3px] rounded-sm border border-[#00f0ff]/50 bg-[#00f0ff]/10 text-[10px] font-bold font-mono uppercase tracking-wider text-[#00f0ff] cursor-pointer hover:bg-[#00f0ff]/25 hover:shadow-[0_0_10px_rgba(0,240,255,0.5)] hover:text-white transition-all" onclick="openInCodeExplorer(\'' + escJs(s.file_path || '') + '\',' + (parseInt(line) || 0) + ')" title="Buka file di Code Explorer (Ctrl+F di viewer utk cari dalam file)">📂 Explorer</button>' +
+                    '<button class="inline-flex items-center gap-1 px-2 py-[3px] rounded-sm border border-[#ff00ea]/50 bg-[#ff00ea]/10 text-[10px] font-bold font-mono uppercase tracking-wider text-[#ff00ea] cursor-pointer hover:bg-[#ff00ea]/25 hover:shadow-[0_0_10px_rgba(255,0,234,0.5)] hover:text-white transition-all" onclick="openAssistantWithFinding(' + s.id + ')" title="Tanya Verification Assistant tentang temuan ini">🤖 Tanya AI</button>' +
+                    '</span>' : '') + '</td>';
         html += '<td>';
         html += '<span class="clickable-secret" data-secret-key="' + secretKey + '" title="Klik untuk membuka source code context">';
         html += '<span class="hardcoded-highlight">' + escHtml(matchVal.substring(0, 100)) + '</span>';
@@ -1851,19 +1883,19 @@ function renderCodeExplorer() {
 
     // ekstensi filter statis (umum) — scope dir dinamis dari listing root
     const exts = ['.java', '.kt', '.smali', '.js', '.ts', '.json', '.xml', '.yaml', '.yml', '.properties', '.md', '.txt', '.c', '.cpp', '.h', '.py', '.dart'];
-    const INPUT_CLS = 'rounded-md px-3 py-2 text-[13px] font-mono bg-[#1e1e1e] border border-[#3c3c3c] text-[#d4d4d4] focus:outline-none focus:border-[#007acc] focus:ring-1 focus:ring-[#007acc]/50 transition-colors placeholder:text-[#6a6a6a]';
-    const SELECT_CLS = 'rounded-md px-2.5 py-2 text-[11px] bg-[#1e1e1e] border border-[#3c3c3c] text-[#cccccc] cursor-pointer focus:outline-none focus:border-[#007acc]';
-    // Chrome ala VS Code: editor #1e1e1e, sidebar #252526, header/footer #2d2d30, border #2b2b2b
-    const PANEL_CLS = 'flex flex-col rounded-lg border border-[#2b2b2b] overflow-hidden';
-    const HEAD_CLS = 'flex items-center gap-2 flex-wrap px-3 py-2 border-b border-[#2b2b2b] bg-[#2d2d30] text-[#cccccc]';
-    const FOOT_CLS = 'px-3 py-1.5 text-[10px] text-[#858585] border-t border-[#2b2b2b] bg-[#2d2d30]';
+    const INPUT_CLS = 'rounded-md px-3 py-2 text-[13px] font-mono bg-[#0a0418] border border-[#3c2a70] text-[#e9eaff] focus:outline-none focus:border-[#00f0ff] focus:ring-1 focus:ring-[#00f0ff]/50 transition-colors placeholder:text-[#5b5d8a]';
+    const SELECT_CLS = 'rounded-md px-2.5 py-2 text-[11px] bg-[#0a0418] border border-[#3c2a70] text-[#e9eaff] cursor-pointer focus:outline-none focus:border-[#00f0ff]';
+    // Chrome ala VS Code di-skin cyberpunk: editor #0a0418, sidebar #0d0620, panel #120825, border #2a2050
+    const PANEL_CLS = 'flex flex-col rounded-lg border border-[#2a2050] overflow-hidden';
+    const HEAD_CLS = 'flex items-center gap-2 flex-wrap px-3 py-2 border-b border-[#2a2050] bg-[#120825] text-[#e9eaff]';
+    const FOOT_CLS = 'px-3 py-1.5 text-[10px] text-[#9192c0] border-t border-[#2a2050] bg-[#120825]';
 
     let html = '';
     // ===== toolbar grep =====
-    html += '<div class="flex items-center gap-2.5 flex-wrap px-4 py-2.5 mb-3 rounded-lg bg-[#252526] border border-[#2b2b2b]">';
+    html += '<div class="flex items-center gap-2.5 flex-wrap px-4 py-2.5 mb-3 rounded-lg bg-[#0d0620] border border-[#2a2050]">';
     html += '<span class="text-base">🔍</span>';
     html += '<input id="ce-q" class="flex-1 min-w-[240px] max-w-[520px] ' + INPUT_CLS + '" placeholder="grep corpus... (Enter = cari)" value="' + escHtml(CE.query) + '">';
-    html += '<label class="flex items-center gap-1 text-[11px] text-[#cccccc] cursor-pointer"><input type="checkbox" id="ce-regex"' + (CE.regexOn ? ' checked' : '') + '> regex</label>';
+    html += '<label class="flex items-center gap-1 text-[11px] text-[#e9eaff] cursor-pointer"><input type="checkbox" id="ce-regex"' + (CE.regexOn ? ' checked' : '') + '> regex</label>';
     html += '<label class="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer"><input type="checkbox" id="ce-case"' + (CE.caseOn ? ' checked' : '') + '> Aa</label>';
     html += '<button class="px-4 py-2 rounded-lg text-[12px] font-bold text-white cursor-pointer bg-gradient-to-r from-purple-500 to-indigo-600 border border-purple-300/30 shadow-md shadow-purple-500/25 hover:brightness-110 transition-all" onclick="ceDoSearch()">Cari</button>';
     html += '<button id="ce-res-btn" class="hidden px-3 py-2 rounded-lg text-[11px] font-bold text-purple-300 bg-purple-500/10 border border-purple-400/40 cursor-pointer hover:bg-purple-500/25 transition-all" onclick="ceGrepModalOpen()" title="Buka lagi hasil grep terakhir">📄 Hasil (<span id="ce-res-count">0</span>)</button>';
@@ -1881,46 +1913,46 @@ function renderCodeExplorer() {
     // ===== 3 panel =====
     html += '<div class="flex gap-0 h-[600px] min-h-[420px]">';
     // tree (sidebar VS Code)
-    html += '<div class="w-[230px] shrink-0 bg-[#252526] ' + PANEL_CLS + '">';
-    html += '<div class="flex flex-col gap-1.5 px-2.5 py-2 border-b border-[#2b2b2b] bg-[#2d2d30]">';
-    html += '<span class="text-[11px] font-bold text-[#cccccc] uppercase tracking-wide">📁 Explorer — corpus/</span>';
-    html += '<input id="ce-tree-filter" class="w-full rounded-md px-2 py-1 text-[11px] bg-[#1e1e1e] border border-[#3c3c3c] text-[#d4d4d4] focus:outline-none focus:border-[#007acc]" placeholder="filter file..." oninput="ceFilterTree(this.value)">';
+    html += '<div class="w-[230px] shrink-0 bg-[#0d0620] ' + PANEL_CLS + '">';
+    html += '<div class="flex flex-col gap-1.5 px-2.5 py-2 border-b border-[#2a2050] bg-[#120825]">';
+    html += '<span class="text-[11px] font-bold text-[#e9eaff] uppercase tracking-wide">📁 Explorer — corpus/</span>';
+    html += '<input id="ce-tree-filter" class="w-full rounded-md px-2 py-1 text-[11px] bg-[#0a0418] border border-[#3c2a70] text-[#e9eaff] focus:outline-none focus:border-[#00f0ff]" placeholder="filter file..." oninput="ceFilterTree(this.value)">';
     html += '</div>';
     html += '<div class="flex-1 overflow-y-auto p-1.5" id="ce-tree">' + ceDirHtml(CE.dirCache['']) + '</div>';
     html += '<div class="' + FOOT_CLS + '" id="ce-tree-count">' + ((CE.dirCache[''] && CE.dirCache[''].total_files) || 0) + ' file di level ini</div>';
     html += '</div>';
     // results (sidebar VS Code)
     // viewer (editor VS Code)
-    html += '<div class="flex-1 min-w-0 bg-[#1e1e1e] relative ' + PANEL_CLS + '" id="ce-viewer-panel">';
+    html += '<div class="flex-1 min-w-0 bg-[#0a0418] relative ' + PANEL_CLS + '" id="ce-viewer-panel">';
     // popup find-in-file ala jadx/VS Code (Ctrl+F)
-    html += '<div id="ce-find" class="absolute top-1.5 right-2 z-20 flex items-center gap-1 px-1.5 py-1 rounded-md bg-[#252526] border border-[#3c3c3c] shadow-lg" style="display:none">';
-    html += '<input id="ce-find-q" class="w-[190px] bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-[12px] font-mono text-[#d4d4d4] focus:outline-none focus:border-[#007acc]" placeholder="cari di file ini...">';
+    html += '<div id="ce-find" class="absolute top-1.5 right-2 z-20 flex items-center gap-1 px-1.5 py-1 rounded-md bg-[#0d0620] border border-[#3c2a70] shadow-lg" style="display:none">';
+    html += '<input id="ce-find-q" class="w-[190px] bg-[#0a0418] border border-[#3c2a70] rounded px-2 py-1 text-[12px] font-mono text-[#e9eaff] focus:outline-none focus:border-[#00f0ff]" placeholder="cari di file ini...">';
     html += '<button id="ce-find-case" onclick="ceFindToggle(\'case\')" title="Match case" class="ce-find-tog">Aa</button>';
     html += '<button id="ce-find-regex" onclick="ceFindToggle(\'regex\')" title="Regex" class="ce-find-tog">.*</button>';
-    html += '<span id="ce-find-count" class="text-[10px] text-[#858585] font-mono min-w-[42px] text-center">0/0</span>';
+    html += '<span id="ce-find-count" class="text-[10px] text-[#9192c0] font-mono min-w-[42px] text-center">0/0</span>';
     html += '<button onclick="ceFindNav(-1)" title="Sebelumnya (Shift+Enter)" class="ce-find-tog">▲</button>';
     html += '<button onclick="ceFindNav(1)" title="Berikutnya (Enter)" class="ce-find-tog">▼</button>';
     html += '<button onclick="ceFindClose()" title="Tutup (Esc)" class="ce-find-tog">✕</button>';
     html += '</div>';
-    html += '<div class="' + HEAD_CLS + ' text-[11px]" id="ce-viewer-head"><span class="text-[#858585]">Pilih file dari tree / hasil grep</span></div>';
-    html += '<div class="flex-1 overflow-auto p-2" id="ce-viewer"><div class="text-center text-[12px] text-[#858585] py-8">Belum ada file terbuka.</div></div>';
-    // footer viewer = status bar VS Code (biru #007acc)
-    html += '<div class="px-3 py-1.5 text-[10px] text-white bg-[#007acc]" id="ce-viewer-foot"></div>';
+    html += '<div class="' + HEAD_CLS + ' text-[11px]" id="ce-viewer-head"><span class="text-[#9192c0]">Pilih file dari tree / hasil grep</span></div>';
+    html += '<div class="flex-1 overflow-auto p-2" id="ce-viewer"><div class="text-center text-[12px] text-[#9192c0] py-8">Belum ada file terbuka.</div></div>';
+    // footer viewer = status bar (deep violet + teks cyan neon)
+    html += '<div class="px-3 py-1.5 text-[10px] text-[#00f0ff] bg-[#0d0620] border-t border-[#00f0ff]/30 shadow-[0_-2px_12px_rgba(0,240,255,0.12)]" id="ce-viewer-foot"></div>';
     html += '</div>';
     html += '</div>';
 
     // ===== POPUP HASIL GREP (dialog ala jadx-gui search) =====
     html += '<div id="ce-grep-modal" class="fixed inset-0 z-30 flex items-start justify-center pt-16 px-4 bg-black/50" style="display:none" onclick="ceGrepModalClose(event)">';
-    html += '<div class="w-[740px] max-w-full flex flex-col rounded-lg bg-[#1e1e1e] border border-[#2b2b2b] shadow-2xl max-h-[74vh]" onclick="event.stopPropagation()">';
-    html += '<div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[#2b2b2b] bg-[#2d2d30]">';
+    html += '<div class="w-[740px] max-w-full flex flex-col rounded-lg bg-[#0a0418] border border-[#2a2050] shadow-2xl max-h-[74vh]" onclick="event.stopPropagation()">';
+    html += '<div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[#2a2050] bg-[#120825]">';
     html += '<span class="text-base">🔍</span>';
     html += '<span class="text-[13px] font-bold text-white">Hasil grep — <span class="font-mono text-purple-300" id="ce-grep-q-label"></span></span>';
     html += '<span id="ce-grep-count" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono"></span>';
-    html += '<span id="ce-grep-meta" class="text-[10px] text-[#858585] font-mono ml-auto"></span>';
-    html += '<button class="w-7 h-7 flex items-center justify-center rounded text-[16px] text-[#cccccc] bg-transparent border-none cursor-pointer hover:bg-[#2a2d2e] hover:text-white" onclick="ceGrepModalCloseDirect()" title="Tutup (Esc)">&times;</button>';
+    html += '<span id="ce-grep-meta" class="text-[10px] text-[#9192c0] font-mono ml-auto"></span>';
+    html += '<button class="w-7 h-7 flex items-center justify-center rounded text-[16px] text-[#e9eaff] bg-transparent border-none cursor-pointer hover:bg-[#1a1438] hover:text-white" onclick="ceGrepModalCloseDirect()" title="Tutup (Esc)">&times;</button>';
     html += '</div>';
     html += '<div class="flex-1 overflow-y-auto p-2" id="ce-grep-results"></div>';
-    html += '<div class="px-4 py-1.5 text-[10px] text-[#858585] border-t border-[#2b2b2b] bg-[#2d2d30]">Klik baris = buka file &amp; scroll ke baris · Esc = tutup</div>';
+    html += '<div class="px-4 py-1.5 text-[10px] text-[#9192c0] border-t border-[#2a2050] bg-[#120825]">Klik baris = buka file &amp; scroll ke baris · Esc = tutup</div>';
     html += '</div>';
     html += '</div>';
 
@@ -1954,7 +1986,7 @@ function ceFetchDir(dir) {
         });
 }
 
-const CE_NODE_CLS = 'flex items-center gap-1 px-2 py-[3px] rounded text-[12px] cursor-pointer whitespace-nowrap truncate text-[#cccccc] hover:bg-[#2a2d2e] hover:text-white';
+const CE_NODE_CLS = 'flex items-center gap-1 px-2 py-[3px] rounded text-[12px] cursor-pointer whitespace-nowrap truncate text-[#e9eaff] hover:bg-[#1a1438] hover:text-white';
 const CE_NODE_FILE_CLS = CE_NODE_CLS + ' font-mono';
 
 function ceDirHtml(data) {
@@ -2131,7 +2163,7 @@ function ceRenderResults(meta) {
     }
 
     if (!CE.matches.length) {
-        box.innerHTML = '<div class="text-center text-[12px] text-[#858585] py-8 px-3">Tidak ada match untuk <b class="text-[#cccccc]">' + escHtml(CE.query) + '</b>.</div>';
+        box.innerHTML = '<div class="text-center text-[12px] text-[#9192c0] py-8 px-3">Tidak ada match untuk <b class="text-[#e9eaff]">' + escHtml(CE.query) + '</b>.</div>';
         return;
     }
 
@@ -2140,7 +2172,7 @@ function ceRenderResults(meta) {
     CE.matches.forEach(function(m) {
         (byFile[m.path] = byFile[m.path] || []).push(m);
     });
-    const RES_ROW_CLS = 'block font-mono text-[11px] text-[#cccccc] px-3 py-1 ml-3 cursor-pointer border-l-2 border-transparent hover:bg-[#094771] hover:border-[#007acc] hover:text-white truncate transition-colors rounded-r';
+    const RES_ROW_CLS = 'block font-mono text-[11px] text-[#e9eaff] px-3 py-1 ml-3 cursor-pointer border-l-2 border-transparent hover:bg-[#00f0ff]/10 hover:border-[#00f0ff] hover:text-white truncate transition-colors rounded-r';
     let html = '';
     Object.keys(byFile).forEach(function(fp) {
         const ms = byFile[fp];
@@ -2148,7 +2180,7 @@ function ceRenderResults(meta) {
         const fileName = fp.substring(fp.lastIndexOf('/') + 1);
         html += '<div class="mb-1.5">';
         if (dirName) {
-            html += '<div class="font-mono text-[10px] text-[#858585] px-3 truncate">📁 ' + escHtml(dirName) + '</div>';
+            html += '<div class="font-mono text-[10px] text-[#9192c0] px-3 truncate">📁 ' + escHtml(dirName) + '</div>';
         }
         html += '<div class="font-mono text-[11px] font-bold text-white px-3 py-0.5 truncate" title="' + escHtml(fp) + '">📄 ' + escHtml(fileName) +
                 ' <span class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 align-middle">' + ms.length + '</span></div>';
@@ -2156,15 +2188,15 @@ function ceRenderResults(meta) {
             // highlight query emas di dalam baris hasil (konsisten dengan viewer)
             const lineHtml = ceWrapMatches(escHtml(m.line_text));
             html += '<div class="' + RES_ROW_CLS + '" onclick="ceOpenFile(\'' + escJs(fp) + '\',' + m.line_no + ');ceGrepModalCloseDirect()">' +
-                    '<span class="inline-block min-w-[44px] text-right mr-2.5 text-[#858585]">' + m.line_no + '</span>' + lineHtml + '</div>';
+                    '<span class="inline-block min-w-[44px] text-right mr-2.5 text-[#9192c0]">' + m.line_no + '</span>' + lineHtml + '</div>';
         });
         if (ms.length > 10) {
-            html += '<div class="text-[10px] text-[#858585] px-4 py-0.5">+' + (ms.length - 10) + ' match lain (buka file untuk semua)</div>';
+            html += '<div class="text-[10px] text-[#9192c0] px-4 py-0.5">+' + (ms.length - 10) + ' match lain (buka file untuk semua)</div>';
         }
         html += '</div>';
     });
     if (CE.truncated) {
-        html += '<div class="text-[10px] text-amber-400/90 px-3 py-1.5 border-t border-[#2b2b2b]">⚠️ Hasil dipotak 500 match — persempit scope/ext/keyword lalu cari lagi.</div>';
+        html += '<div class="text-[10px] text-amber-400/90 px-3 py-1.5 border-t border-[#2a2050]">⚠️ Hasil dipotak 500 match — persempit scope/ext/keyword lalu cari lagi.</div>';
     }
     box.innerHTML = html;
 }
@@ -2383,11 +2415,11 @@ function ceRenderViewer() {
     if (head) {
         head.innerHTML =
             '<span class="font-mono text-[11px] text-white truncate max-w-[45%]" title="' + escHtml(data.path) + '">' + escHtml(data.path) + '</span>' +
-            (ext ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#264f78] text-[#9cdcfe]">' + escHtml(ext) + '</span>' : '') +
-            '<span class="text-[#858585]">' + (data.size / 1024).toFixed(1) + ' KB · ' + data.total_lines.toLocaleString('id') + ' baris</span>' +
+            (ext ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#00f0ff]/10 text-[#00f0ff]">' + escHtml(ext) + '</span>' : '') +
+            '<span class="text-[#9192c0]">' + (data.size / 1024).toFixed(1) + ' KB · ' + data.total_lines.toLocaleString('id') + ' baris</span>' +
             '<span class="ml-auto flex gap-1.5">' +
-            '<button class="px-2 py-1 rounded border border-[#3c3c3c] text-[10px] text-[#cccccc] bg-transparent cursor-pointer hover:bg-[#2a2d2e] hover:text-white transition-colors" onclick="ceFindOpen()" title="Cari di file ini (Ctrl+F)">🔍 Cari</button>' +
-            '<button class="px-2 py-1 rounded border border-[#3c3c3c] text-[10px] text-[#cccccc] bg-transparent cursor-pointer hover:bg-[#2a2d2e] hover:text-white transition-colors" onclick="ceCopyPath()" title="Copy path">📋 Copy</button>' +
+            '<button class="px-2 py-1 rounded border border-[#3c2a70] text-[10px] text-[#e9eaff] bg-transparent cursor-pointer hover:bg-[#1a1438] hover:text-white transition-colors" onclick="ceFindOpen()" title="Cari di file ini (Ctrl+F)">🔍 Cari</button>' +
+            '<button class="px-2 py-1 rounded border border-[#3c2a70] text-[10px] text-[#e9eaff] bg-transparent cursor-pointer hover:bg-[#1a1438] hover:text-white transition-colors" onclick="ceCopyPath()" title="Copy path">📋 Copy</button>' +
             '<button class="px-2 py-1 rounded border border-purple-400/40 text-[10px] font-bold text-purple-300 bg-purple-500/10 cursor-pointer hover:bg-purple-500/25 transition-colors" onclick="ceAskAI()">🤖 Tanya AI</button>' +
             '</span>';
     }
@@ -2396,7 +2428,7 @@ function ceRenderViewer() {
     data.lines.forEach(function(l) {
         const isFocus = CE.focusLine && l.no === CE.focusLine;
         html += '<div class="ce-line flex items-start' + (isFocus ? ' ce-focus' : '') + '" id="ce-l-' + l.no + '" data-no="' + l.no + '">' +
-                '<span class="w-[52px] shrink-0 text-right pr-3 pl-2 select-none text-[#858585] hover:text-[#c6c6c6] text-[12px] leading-[1.55] border-r border-[#2b2b2b]">' + l.no + '</span>' +
+                '<span class="w-[52px] shrink-0 text-right pr-3 pl-2 select-none text-[#9192c0] hover:text-[#e9eaff] text-[12px] leading-[1.55] border-r border-[#2a2050]">' + l.no + '</span>' +
                 '<span class="ce-code-cell flex-1 pl-3 whitespace-pre-wrap break-all">' + ceWrapMatches(ceColorLine(l.text, l.no)) + '</span>' +
                 '</div>';
     });

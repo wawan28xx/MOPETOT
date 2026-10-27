@@ -43,7 +43,7 @@ function download(url, dest) {
     const html = fs.readFileSync('templates/results.html', 'utf-8');
     const m = html.match(/function ceWrapMatches\(html\) \{[\s\S]*?\n\}/);
     if (!m) { console.error('ceWrapMatches tidak ketemu'); process.exit(1); }
-    global.CE = {highlightQuery: 'api.stockbit.com', regexOn: false, caseOn: false};
+    global.CE = {highlightQuery: 'api.stockbit.com', regexOn: false, caseOn: false, find: {open: false, query: '', regexOn: false, caseOn: false}};
     eval(m[0]);
     const wrapped = ceWrapMatches(colored);
     console.log('wrapped   :', wrapped.substring(0, 220));

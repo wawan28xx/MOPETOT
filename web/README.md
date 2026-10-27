@@ -1,6 +1,17 @@
-# Mobile Audit Tool — Web GUI
+# Mopetot — Web GUI
 
 Web-based interface untuk mobile application security audit. Upload APK/IPA, auto-scan, lihat hasil dalam dashboard.
+
+## Login
+
+Seluruh halaman & API diproteksi session. Kredensial default:
+
+```
+username: mopetot
+password: P@petot
+```
+
+Override via env: `MOPETOT_USER` / `MOPETOT_PASS`. Session cookie httponly, TTL 12 jam; restart server = login ulang. Tombol **⏻ Jack Out** di navbar untuk logout.
 
 ## Quick Start
 

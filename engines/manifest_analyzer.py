@@ -115,6 +115,50 @@ def parse_manifest_xml(text: str):
     return result
 
 
+def _fill_from_apktool_yml(result: dict, decoded_dir: Path = None, apk_root: Path = None):
+    """Fallback versi/SDK dari apktool.yml (kasus split APK / manifest binary:
+    versionName & uses-sdk sering tidak ada di AndroidManifest hasil decode)."""
+    if result is None:
+        return result
+    candidates = []
+    for d in (decoded_dir, apk_root):
+        if d is not None:
+            candidates.append(Path(d) / "apktool.yml")
+    yml = None
+    for c in candidates:
+        if c.exists():
+            yml = c
+            break
+    if yml is None:
+        return result
+    try:
+        text = yml.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return result
+
+    def yget(key):
+        m = re.search(r"^\s*" + re.escape(key) + r":\s*['\"]?([\w.\-]+)", text, re.M)
+        return m.group(1) if m else None
+
+    if not result.get("version"):
+        v = yget("versionName")
+        if v:
+            result["version"] = v
+    if not result.get("version_code"):
+        v = yget("versionCode")
+        if v:
+            result["version_code"] = v
+    if not result.get("min_sdk"):
+        v = yget("minSdkVersion")
+        if v:
+            result["min_sdk"] = v
+    if not result.get("target_sdk"):
+        v = yget("targetSdkVersion")
+        if v:
+            result["target_sdk"] = v
+    return result
+
+
 def analyze_manifest(corpus_dir: Path = None, decoded_dir: Path = None, apk_root: Path = None):
     """Cari + parse manifest. Return dict atau None."""
     manifest = _find_manifest(corpus_dir, decoded_dir, apk_root)
@@ -122,9 +166,11 @@ def analyze_manifest(corpus_dir: Path = None, decoded_dir: Path = None, apk_root
         return None
     text = manifest.read_text(encoding="utf-8", errors="replace")
     try:
-        return parse_manifest_xml(text)
+        result = parse_manifest_xml(text)
     except Exception:
-        return None
+        result = None
+    # Split APK / manifest binary: lengkapi version & SDK dari apktool.yml
+    return _fill_from_apktool_yml(result, decoded_dir, apk_root)
 
 
 # ===== IPA: manifest dari Info.plist =====

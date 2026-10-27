@@ -2748,8 +2748,8 @@ body.chat-open #chat-fab {
 
 /* State terpilih di file tree (dip-toggle via JS) */
 .ce-sel {
-    background: rgba(168, 85, 247, 0.25);
-    color: #e9d5ff;
+    background: rgba(0, 240, 255, 0.14);
+    color: #b3fbff;
 }
 
 /* Match highlight emas (dipakai di viewer + snippet) */
@@ -2787,9 +2787,10 @@ body.chat-open #chat-fab {
 
 /* Toggle aktif (Aa / .*) — aksen biru VS Code */
 .ce-find-on {
-    background: #094771 !important;
-    border-color: #007acc !important;
+    background: rgba(0, 240, 255, 0.22) !important;
+    border-color: #00f0ff !important;
     color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.45);
 }
 
 /* Match AKTIF (current) pada find: solid emas, kontras penuh */
@@ -2815,7 +2816,7 @@ body.chat-open #chat-fab {
     font-family: Consolas, 'Courier New', monospace;
     font-size: 13px;
     line-height: 1.55;
-    color: #d4d4d4;
+    color: #e9eaff;
 }
 
 .ce-active-idx {
@@ -2830,7 +2831,7 @@ body.chat-open #chat-fab {
 /* Fallback offline (Tailwind CDN tidak termuat): layout minimal agar tetap usable */
 #ce-tree, #ce-results, #ce-viewer {
     overflow: auto;
-    background: #1e1e1e;
+    background: #0a0418;
 }
 
 .ce-line {
@@ -2839,23 +2840,6 @@ body.chat-open #chat-fab {
 }
 
 
-.btn-chat-assist {
-    margin-top: 6px;
-    padding: 2px 10px;
-    background: var(--bg-card);
-    border: 1px solid rgba(168, 85, 247, 0.5);
-    border-radius: 10px;
-    color: #c084fc;
-    font-size: 10px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.btn-chat-assist:hover {
-    background: rgba(168, 85, 247, 0.2);
-    border-color: #c084fc;
-}
 
 /* CLICKABLE VERIFICATION RESULT BADGE */
 .res-clickable {

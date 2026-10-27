@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -26,7 +26,6 @@ from database.db import (
     upsert_poc_cache, get_poc_cache, insert_chat_message, get_chat_history,
     clear_chat_history, request_scan, claim_next_queued_scan,
     fail_interrupted_scans
-)
 )
 
 from verification import (
@@ -72,7 +71,7 @@ MAX_UPLOAD_BYTES = _positive_int_env(
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Mobile Audit Tool", version="1.0.0")
+app = FastAPI(title="Mopetot", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -81,6 +80,54 @@ QUEUE_TASK = None
 QUEUE_WAKEUP = None
 ACTIVE_PROCESS = None
 SHUTTING_DOWN = False
+
+# ------------------------- AUTH (login page + session) -------------------------
+
+from auth import login as auth_login, valid as session_valid, logout as session_logout, SESSION_COOKIE, SESSION_TTL
+
+PUBLIC_PATHS = ("/login", "/static")  # /logout juga dikecualikan (lihat bawah)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if path == "/logout" or path.startswith(PUBLIC_PATHS):
+        return await call_next(request)
+    if not session_valid(request.cookies.get(SESSION_COOKIE)):
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+@app.get("/login")
+async def login_page(request: Request):
+    if session_valid(request.cookies.get(SESSION_COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    token = auth_login(form.get("username", ""), form.get("password", ""))
+    if not token:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "ACCESS DENIED — kredensial tidak valid"},
+            status_code=401,
+        )
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL)
+    return resp
+
+
+@app.get("/logout")
+async def logout_route(request: Request):
+    session_logout(request.cookies.get(SESSION_COOKIE))
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
 
 @app.on_event("startup")
 async def startup():

@@ -36,3 +36,6 @@ web/.env
 # Optional local temp/test files
 *.tmp
 *.bak
+
+# Local scratch/frida scripts (user-local, jangan di-push)
+tmp/

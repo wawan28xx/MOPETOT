@@ -1,0 +1,816 @@
+/* ============================================================
+ * MOBILE AUDIT TOOL — RETRO CYBERPUNK THEME
+ * Adapted from github.com/rintran720/cyberpunk-ui design language:
+ * neon palette, Orbitron/JetBrains Mono, glow shadows, scanlines,
+ * grid bg, sharp corners, corner-cut cards, glitch headings.
+ *
+ * Loaded AFTER style.css — overrides app CSS vars + restyles
+ * existing component classes so the whole site themes at once.
+ * ============================================================ */
+
+/* ---------- 0. FONT CYBERPUNK (vendor lokal: static/fonts/) ----------
+ * "Cyberpunk" by Lyon ArtZ — free for personal use
+ * (source: fonts4free.net/cyberpunk-font.html). Dipakai logo MOPETOT. */
+@font-face {
+    font-family: 'Cyberpunk';
+    src: url('/static/fonts/Cyberpunk-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* ---------- 1. TOKEN OVERRIDES (app CSS vars -> cyberpunk) ---------- */
+:root {
+    /* Surfaces: deep night / void violet */
+    --bg-primary: #05010a;
+    --bg-secondary: #0a0418;
+    --bg-card: #120825;
+    --bg-hover: #1a1438;
+
+    /* Foreground */
+    --text-primary: #e9eaff;
+    --text-secondary: #9192c0;
+    --text-muted: #5b5d8a;
+
+    /* Neon accents */
+    --border: #2a2050;
+    --border-soft: #1a1438;
+    --accent: #00f0ff;          /* cyan 500 */
+    --accent-hover: #4df2ff;    /* cyan 300 */
+    --magenta-neon: #ff00ea;
+    --yellow-neon: #fcee0a;
+    --green-neon: #39ff14;
+    --purple-neon: #bd00ff;
+    --orange-neon: #ff6b00;
+    --pink-neon: #ff2b7a;
+    --red-neon: #ff003c;
+
+    /* Severity -> neon */
+    --success: #39ff14;
+    --warning: #fcee0a;
+    --danger: #ff003c;
+    --info: #00f0ff;
+    --critical: #ff003c;
+    --high: #ff6b00;
+    --medium: #fcee0a;
+    --low: #39ff14;
+    --info-sev: #00f0ff;
+
+    /* Fonts (fallback aman bila CDN font gagal) */
+    --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    --font-sans: 'Rajdhani', 'Inter', system-ui, sans-serif;
+    --font-display: 'Orbitron', 'Rajdhani', 'JetBrains Mono', monospace;
+
+    /* Sharp corners + glow */
+    --radius: 2px;
+    --shadow: 0 0 12px rgba(0, 240, 255, 0.18), 0 0 32px rgba(0, 240, 255, 0.08);
+    --glow-cyan: 0 0 12px rgba(0, 240, 255, 0.55), 0 0 32px rgba(0, 240, 255, 0.30);
+    --glow-magenta: 0 0 12px rgba(255, 0, 234, 0.55), 0 0 32px rgba(255, 0, 234, 0.30);
+    --glow-yellow: 0 0 12px rgba(252, 238, 10, 0.55), 0 0 32px rgba(252, 238, 10, 0.30);
+    --glow-green: 0 0 12px rgba(57, 255, 20, 0.55), 0 0 32px rgba(57, 255, 20, 0.30);
+    --glow-red: 0 0 12px rgba(255, 0, 60, 0.55), 0 0 32px rgba(255, 0, 60, 0.30);
+
+    --ease-snap: cubic-bezier(0.85, 0, 0.15, 1);
+}
+
+/* ---------- 2. BASE / ROOT (ala cp-root) ---------- */
+body {
+    background-color: var(--bg-primary);
+    background-image:
+        linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+}
+
+/* Scanline CRT overlay halus di seluruh halaman */
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9998;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.025) 0,
+        rgba(255, 255, 255, 0.025) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    mix-blend-mode: overlay;
+}
+
+::selection {
+    background: var(--magenta-neon);
+    color: #05010a;
+    text-shadow: none;
+}
+
+/* Scrollbar neon */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #02000a; }
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #00f0ff, #ff00ea);
+    border: 2px solid #02000a;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+a { color: var(--accent); transition: color 150ms var(--ease-snap); }
+a:hover { color: var(--magenta-neon); text-shadow: 0 0 8px currentColor; }
+
+code, pre, kbd, samp { font-family: var(--font-mono); }
+
+/* ---------- 3. CYBERPUNK UTILITIES ---------- */
+.cp-display { font-family: var(--font-display); }
+.cp-upper { text-transform: uppercase; letter-spacing: 0.12em; }
+.cp-glow-cyan { text-shadow: 0 0 6px rgba(0, 240, 255, 0.8), 0 0 18px rgba(0, 240, 255, 0.4); }
+.cp-glow-magenta { text-shadow: 0 0 6px rgba(255, 0, 234, 0.8), 0 0 18px rgba(255, 0, 234, 0.4); }
+.cp-glow-yellow { text-shadow: 0 0 6px rgba(252, 238, 10, 0.8), 0 0 18px rgba(252, 238, 10, 0.4); }
+.cp-glow-green { text-shadow: 0 0 6px rgba(57, 255, 20, 0.8), 0 0 18px rgba(57, 255, 20, 0.4); }
+.cp-box-glow-cyan { box-shadow: var(--glow-cyan); }
+.cp-box-glow-magenta { box-shadow: var(--glow-magenta); }
+.cp-corner-cut {
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.cp-corner-cut-tr {
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+
+/* Glitch heading (logo / judul hero) */
+@keyframes cp-glitch-shift {
+    0%, 100% { transform: translate(0, 0); }
+    20% { transform: translate(-2px, 1px); }
+    40% { transform: translate(2px, -1px); }
+    60% { transform: translate(-1px, -2px); }
+    80% { transform: translate(1px, 2px); }
+}
+@keyframes cp-glitch-clip-1 {
+    0%   { clip-path: inset(20% 0 60% 0); }
+    20%  { clip-path: inset(80% 0 5% 0); }
+    40%  { clip-path: inset(5% 0 75% 0); }
+    60%  { clip-path: inset(45% 0 30% 0); }
+    80%  { clip-path: inset(70% 0 15% 0); }
+    100% { clip-path: inset(20% 0 60% 0); }
+}
+@keyframes cp-flicker {
+    0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% { opacity: 1; }
+    20%, 21.999%, 63%, 63.999%, 65%, 69.999% { opacity: 0.55; }
+}
+.cp-glitch {
+    position: relative;
+    display: inline-block;
+    animation: cp-flicker 4s infinite;
+}
+.cp-glitch::before,
+.cp-glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.7;
+}
+.cp-glitch::before {
+    color: var(--magenta-neon);
+    animation: cp-glitch-shift 2.4s infinite steps(2, end), cp-glitch-clip-1 2.8s infinite;
+    mix-blend-mode: screen;
+}
+.cp-glitch::after {
+    color: var(--accent);
+    animation: cp-glitch-shift 1.8s infinite steps(2, end) reverse;
+    mix-blend-mode: screen;
+}
+
+/* Marquee ticker */
+@keyframes cp-marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+.cp-ticker {
+    overflow: hidden;
+    white-space: nowrap;
+    background: #02000a;
+    border-bottom: 1px solid var(--border-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.cp-ticker__track {
+    display: inline-block;
+    padding: 4px 0;
+    animation: cp-marquee 28s linear infinite;
+}
+.cp-ticker__track span { margin: 0 18px; }
+.cp-ticker b { color: var(--accent); font-weight: 400; }
+
+/* ---------- 4. NAVBAR / CHROME ---------- */
+
+/* MOPETOT logo — font "Cyberpunk" asli (Lyon ArtZ), gaya wordmark
+ * Cyberpunk 2077: huruf awal BESAR + sisa huruf kecil rapat,
+ * kuning neon + versi cyan ala "2077", dengan animasi glitch. */
+.cp-logo {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    text-decoration: none !important;
+    line-height: 1;
+}
+.cp-logo-word {
+    display: inline-flex;
+    align-items: baseline;
+    font-family: 'Cyberpunk', var(--font-display) !important;
+    color: var(--yellow-neon) !important;
+    transform: skewX(-8deg);
+    transform-origin: left center;
+    text-shadow: 0 0 8px rgba(252, 238, 10, 0.75), 0 0 24px rgba(252, 238, 10, 0.35);
+    animation: cp-flicker 5s infinite;
+    position: relative;
+}
+.cp-logo-big {
+    font-size: 2rem;
+    line-height: 0.9;
+    margin-right: 1px;
+    animation: cp-logo-glitch 6s infinite;
+    position: relative;
+    display: inline-block;
+}
+.cp-logo-rest {
+    font-size: 1.02rem;
+    letter-spacing: 0.09em;
+    animation: cp-flicker 7s infinite;
+}
+
+/* Glitch jitter pada huruf M — gerak acak tiap beberapa detik */
+@keyframes cp-logo-glitch {
+    0%, 91%, 94%, 98%, 100% {
+        transform: translate(0, 0) skewX(0deg);
+        text-shadow: 0 0 8px rgba(252, 238, 10, 0.75), 0 0 24px rgba(252, 238, 10, 0.35);
+    }
+    92% {
+        transform: translate(-2px, 1px) skewX(-10deg);
+        text-shadow: -2px 0 0 rgba(255, 0, 234, 0.8), 2px 0 0 rgba(0, 240, 255, 0.8);
+        color: #ffffff;
+    }
+    93% {
+        transform: translate(2px, -1px) skewX(8deg);
+        text-shadow: 2px 0 0 rgba(255, 0, 234, 0.8), -2px 0 0 rgba(0, 240, 255, 0.8);
+    }
+    96% {
+        transform: translate(-1px, 0) skewX(0deg);
+        text-shadow: -1px 0 0 rgba(0, 240, 255, 0.7);
+    }
+}
+.cp-logo-ver {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--accent) !important;
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.7), 0 0 20px rgba(0, 240, 255, 0.35);
+    align-self: flex-start;
+    margin-top: 2px;
+}
+.cp-logo:hover .cp-logo-word {
+    text-shadow: 0 0 10px rgba(252, 238, 10, 0.95), 0 0 34px rgba(252, 238, 10, 0.5);
+}
+.cp-logo:hover .cp-logo-ver {
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.95), 0 0 28px rgba(0, 240, 255, 0.5);
+}
+
+.navbar {
+    background: rgba(2, 0, 10, 0.92) !important;
+    border-bottom: 1px solid var(--border) !important;
+    box-shadow: 0 1px 0 rgba(0, 240, 255, 0.25), 0 4px 24px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+}
+.navbar .logo {
+    color: var(--magenta-neon) !important;
+    text-shadow: 0 0 8px rgba(255, 0, 234, 0.6);
+    font-size: 1.05rem;
+}
+.nav-brand a {
+    font-family: var(--font-display) !important;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-primary) !important;
+}
+.nav-link {
+    font-family: var(--font-display) !important;
+    font-size: 11px !important;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-secondary) !important;
+    border: 1px solid transparent;
+}
+.nav-link:hover, .nav-link.active {
+    color: var(--accent) !important;
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+}
+.nav-search input {
+    background: #02000a !important;
+    border: 1px solid var(--border) !important;
+    font-family: var(--font-mono) !important;
+    border-radius: var(--radius) !important;
+}
+.nav-search input:focus {
+    outline: none !important;
+    border-color: var(--accent) !important;
+    box-shadow: var(--glow-cyan) !important;
+}
+
+/* ---------- 5. BUTTONS (ala cp-btn) ---------- */
+.btn {
+    font-family: var(--font-display) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 12px !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border) !important;
+    background: transparent;
+    color: var(--text-secondary) !important;
+    transition: all 150ms var(--ease-snap);
+}
+.btn:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+    box-shadow: var(--glow-cyan);
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.7);
+}
+.btn-primary {
+    background: transparent !important;
+    border: 1px solid var(--accent) !important;
+    color: var(--accent) !important;
+    box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.15), 0 0 10px rgba(0, 240, 255, 0.25);
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.btn-primary:hover {
+    background: rgba(0, 240, 255, 0.12) !important;
+    box-shadow: var(--glow-cyan);
+}
+.btn-secondary {
+    background: transparent !important;
+    border: 1px solid var(--magenta-neon) !important;
+    color: var(--magenta-neon) !important;
+    box-shadow: inset 0 0 12px rgba(255, 0, 234, 0.12);
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.btn-secondary:hover {
+    background: rgba(255, 0, 234, 0.12) !important;
+    box-shadow: var(--glow-magenta);
+}
+.btn-danger:hover { border-color: var(--red-neon) !important; color: var(--red-neon) !important; box-shadow: var(--glow-red); }
+
+/* Tombol aksi di results (verify, copy, PoC) */
+.btn-verify, .btn-adb-copy {
+    font-family: var(--font-display) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--accent) !important;
+    color: var(--accent) !important;
+    background: rgba(0, 240, 255, 0.06) !important;
+}
+.btn-verify:hover, .btn-adb-copy:hover {
+    background: rgba(0, 240, 255, 0.15) !important;
+    box-shadow: var(--glow-cyan) !important;
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.8);
+}
+
+/* ---------- 6. CARDS / PANELS / SECTIONS ---------- */
+.section-block, .dash-panel, .card {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    transition: border-color 150ms var(--ease-snap), box-shadow 150ms var(--ease-snap);
+}
+.section-block:hover, .dash-panel:hover {
+    border-color: rgba(0, 240, 255, 0.45) !important;
+    box-shadow: 0 0 16px rgba(0, 240, 255, 0.12);
+}
+.section-title-static {
+    font-family: var(--font-display) !important;
+    font-size: 13px !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-left: 3px solid var(--magenta-neon) !important;
+    padding-left: 10px !important;
+}
+.section-title-static span { color: var(--accent) !important; }
+.section-count {
+    font-family: var(--font-mono) !important;
+    color: var(--yellow-neon) !important;
+    text-shadow: 0 0 8px rgba(252, 238, 10, 0.5);
+}
+
+/* ---------- 7. TABS ---------- */
+.tabs {
+    border-bottom: 1px solid var(--border) !important;
+    background: rgba(2, 0, 10, 0.6) !important;
+}
+.tab {
+    font-family: var(--font-display) !important;
+    font-size: 11px !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted) !important;
+    border-bottom: 2px solid transparent !important;
+    transition: all 150ms var(--ease-snap);
+}
+.tab:hover { color: var(--accent) !important; text-shadow: 0 0 8px rgba(0, 240, 255, 0.5); }
+.tab.active {
+    color: var(--accent) !important;
+    border-bottom-color: var(--accent) !important;
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.7);
+    background: rgba(0, 240, 255, 0.06) !important;
+}
+.tab-badge {
+    font-family: var(--font-mono) !important;
+    color: var(--magenta-neon) !important;
+    text-shadow: 0 0 6px rgba(255, 0, 234, 0.5);
+}
+
+/* ---------- 8. TABLES ---------- */
+.secrets-table { border: 1px solid var(--border-soft) !important; }
+.secrets-table th {
+    font-family: var(--font-display) !important;
+    font-size: 10px !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: #02000a !important;
+    color: var(--accent) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+.secrets-table td { border-bottom: 1px solid var(--border-soft) !important; }
+.secrets-table tr:hover td { background: rgba(0, 240, 255, 0.04) !important; }
+
+.hardcoded-highlight {
+    background: rgba(255, 0, 234, 0.12) !important;
+    border: 1px solid rgba(255, 0, 234, 0.4) !important;
+    color: #ffb3f4 !important;
+    text-shadow: 0 0 6px rgba(255, 0, 234, 0.5);
+    border-radius: var(--radius);
+}
+.rule-chip {
+    font-family: var(--font-mono) !important;
+    background: rgba(0, 240, 255, 0.08) !important;
+    border: 1px solid rgba(0, 240, 255, 0.35) !important;
+    color: var(--accent) !important;
+}
+.cat-label {
+    font-family: var(--font-mono) !important;
+    color: var(--text-muted) !important;
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+}
+.permission-tag {
+    font-family: var(--font-mono) !important;
+    border-radius: var(--radius) !important;
+}
+.permission-tag.danger { border-color: var(--red-neon) !important; color: var(--red-neon) !important; text-shadow: 0 0 6px rgba(255, 0, 60, 0.4); }
+
+/* ---------- 9. SEVERITY BADGES (neon glow) ---------- */
+.sev-badge, .sev-critical, .sev-high, .sev-medium, .sev-low, .sev-info {
+    font-family: var(--font-display) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.1em !important;
+    border-radius: var(--radius) !important;
+}
+.sev-critical, .badge-critical {
+    background: rgba(255, 0, 60, 0.15) !important;
+    border: 1px solid var(--red-neon) !important;
+    color: #ff2b4d !important;
+    text-shadow: 0 0 8px rgba(255, 0, 60, 0.7) !important;
+    box-shadow: 0 0 10px rgba(255, 0, 60, 0.25);
+}
+.sev-high, .badge-high {
+    background: rgba(255, 107, 0, 0.15) !important;
+    border: 1px solid var(--orange-neon) !important;
+    color: #ff8530 !important;
+    text-shadow: 0 0 8px rgba(255, 107, 0, 0.6) !important;
+}
+.sev-medium, .badge-medium {
+    background: rgba(252, 238, 10, 0.12) !important;
+    border: 1px solid var(--yellow-neon) !important;
+    color: var(--yellow-neon) !important;
+    text-shadow: 0 0 8px rgba(252, 238, 10, 0.5) !important;
+}
+.sev-low, .sev-info, .badge-low {
+    background: rgba(57, 255, 20, 0.10) !important;
+    border: 1px solid rgba(57, 255, 20, 0.7) !important;
+    color: var(--green-neon) !important;
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.5) !important;
+}
+
+/* Status scan (running / completed / failed) */
+.status-running { color: var(--yellow-neon) !important; text-shadow: 0 0 8px rgba(252, 238, 10, 0.6); }
+.status-completed { color: var(--green-neon) !important; text-shadow: 0 0 8px rgba(57, 255, 20, 0.6); }
+.status-failed { color: var(--red-neon) !important; text-shadow: 0 0 8px rgba(255, 0, 60, 0.6); }
+
+/* ---------- 10. DASHBOARD ---------- */
+.dash-hero h1 {
+    font-size: 1.8rem !important;
+    color: var(--accent) !important;
+    text-shadow: 0 0 12px rgba(0, 240, 255, 0.55), 0 0 32px rgba(0, 240, 255, 0.3);
+}
+.dash-hero p { color: var(--text-secondary) !important; }
+.dash-kpi {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    transition: all 150ms var(--ease-snap);
+}
+.dash-kpi:hover { border-color: var(--accent) !important; box-shadow: var(--glow-cyan); }
+.dash-kpi.active {
+    border-color: var(--magenta-neon) !important;
+    box-shadow: inset 0 0 16px rgba(255, 0, 234, 0.08), 0 0 12px rgba(255, 0, 234, 0.2);
+}
+.dash-kpi-label {
+    font-family: var(--font-display) !important;
+    font-size: 10px !important;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted) !important;
+}
+.dash-kpi-value {
+    font-family: var(--font-mono) !important;
+    color: var(--accent) !important;
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+.dash-kpi-value.is-success { color: var(--green-neon) !important; text-shadow: 0 0 10px rgba(57, 255, 20, 0.5); }
+.dash-kpi-value.is-warning { color: var(--yellow-neon) !important; text-shadow: 0 0 10px rgba(252, 238, 10, 0.5); }
+.dash-kpi-value.is-danger { color: var(--red-neon) !important; text-shadow: 0 0 10px rgba(255, 0, 60, 0.5); }
+
+.dash-panel-head h2 { color: var(--text-primary) !important; }
+input, select, textarea {
+    border-radius: var(--radius) !important;
+    font-family: var(--font-mono) !important;
+}
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent) !important;
+    box-shadow: var(--glow-cyan) !important;
+}
+
+/* ---------- 11. MODAL & MISC ---------- */
+.ctx-modal-box {
+    border: 1px solid var(--accent) !important;
+    box-shadow: var(--glow-cyan), 0 0 64px rgba(0, 0, 0, 0.7) !important;
+    border-radius: var(--radius) !important;
+}
+.ctx-modal-title { font-family: var(--font-display) !important; text-transform: uppercase; letter-spacing: 0.08em; }
+.ctx-modal-footer { border-top: 1px solid var(--border) !important; }
+.ctx-code-wrapper { background: #02000a !important; border: 1px solid var(--border-soft) !important; }
+
+.spinner-text, .tab-loading { color: var(--text-muted); }
+.empty-state { border: 1px dashed var(--border) !important; }
+.error-box { border: 1px solid var(--red-neon) !important; box-shadow: var(--glow-red); }
+.error-box h3 { color: var(--red-neon) !important; }
+
+/* Progress bar scan */
+.progress-bar, .scan-progress { background: #02000a !important; border: 1px solid var(--border) !important; }
+.progress-fill {
+    background: linear-gradient(90deg, var(--accent), var(--magenta-neon)) !important;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+}
+
+/* ---------- 12. FOOTER ---------- */
+.footer {
+    border-top: 1px solid var(--border) !important;
+    background: rgba(2, 0, 10, 0.85) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11px;
+    color: var(--text-muted) !important;
+}
+.footer p::before { content: "// "; color: var(--accent); }
+
+/* ---------- 13. Upload dropzone ---------- */
+.upload-dropzone, .dropzone {
+    border: 2px dashed var(--border) !important;
+    border-radius: var(--radius) !important;
+    background: rgba(10, 4, 24, 0.5) !important;
+    transition: all 150ms var(--ease-snap);
+}
+.upload-dropzone:hover, .dropzone:hover, .upload-dropzone.dragover {
+    border-color: var(--magenta-neon) !important;
+    box-shadow: var(--glow-magenta);
+    background: rgba(255, 0, 234, 0.04) !important;
+}
+
+/* ---------- 13b. BGM music toggle (equalizer icon ala cyberpunk) ---------- */
+/* Tanpa kotak/border — hanya animasi bars yang terlihat */
+#bgm-toggle {
+    border: none !important;
+    background: transparent !important;
+    padding: 0;
+}
+
+.bgm-eq {
+    color: #3a3c63;            /* idle: gelap, nyaris menyatu dgn navbar */
+    opacity: 0.7;
+    transition: color 150ms var(--ease-snap), opacity 150ms var(--ease-snap);
+}
+
+.bgm-muted .bgm-eq {
+    color: #34365c;
+    opacity: 0.55;
+}
+
+.bgm-muted .bgm-bar {
+    transform: scaleY(0.28);
+    transform-origin: center bottom;
+    transition: transform 200ms var(--ease-snap);
+}
+
+#bgm-toggle:hover .bgm-eq {
+    color: #00f0ff;
+    opacity: 1;
+}
+
+.bgm-playing .bgm-eq {
+    color: #ff00ea;
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(255, 0, 234, 0.8));
+}
+
+.bgm-playing .bgm-bar {
+    transform-origin: center bottom;
+    animation: cp-eq-bounce 0.9s ease-in-out infinite;
+}
+.bgm-playing .bgm-bar.b1 { animation-delay: 0s; }
+.bgm-playing .bgm-bar.b2 { animation-delay: 0.22s; }
+.bgm-playing .bgm-bar.b3 { animation-delay: 0.44s; }
+
+@keyframes cp-eq-bounce {
+    0%, 100% { transform: scaleY(0.35); }
+    50%      { transform: scaleY(1); }
+}
+
+/* ---------- 14. CITY BACKGROUND (canvas animasi skyline + hujan + petir) ---------- */
+#city-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Konten utama harus di ATAS canvas (z-index 1).
+ * Navbar tetap sticky (z-index saja, position tidak diubah). */
+.navbar { z-index: 10; }
+.cp-ticker { position: relative; z-index: 10; }
+main.container { position: relative; z-index: 1; }
+footer.footer { position: relative; z-index: 1; }
+.search-dropdown { z-index: 20; }
+.login-shell { z-index: 1; }
+
+/* ---------- 15. SYNTAX PALETTE — CYBERPUNK (Code Explorer viewer) -----------
+ * Override token hljs (theme vs2015 = dominan coklat/abu) dengan palet neon.
+ * Selector diprefix .ce-code-cell agar menang dari stylesheet hljs apapun urutan load.
+ * Fallback tokenizer (.ce-*) juga dioverride di sini. */
+.ce-code-cell .hljs-keyword,
+.ce-code-cell .hljs-selector-tag,
+.ce-code-cell .hljs-literal,
+.ce-code-cell .hljs-section,
+.ce-code-cell .hljs-doctag,
+.ce-code-cell .hljs-type,
+.ce-code-cell .hljs-name,
+.ce-code-cell .hljs-strong { color: #00f0ff !important; }               /* cyan */
+
+.ce-code-cell .hljs-string,
+.ce-code-cell .hljs-regexp,
+.ce-code-cell .hljs-addition { color: #ff80ed !important; }             /* light magenta */
+
+.ce-code-cell .hljs-comment { color: #7c7cb5 !important; font-style: italic !important; }
+
+.ce-code-cell .hljs-number { color: #fcee0a !important; }                /* neon yellow */
+
+.ce-code-cell .hljs-title,
+.ce-code-cell .hljs-title.function_,
+.ce-code-cell .hljs-title.class_ { color: #fcee0a !important; }
+
+.ce-code-cell .hljs-title.function_ { color: #fcee0a !important; text-shadow: 0 0 6px rgba(252, 238, 10, 0.35); }
+
+.ce-code-cell .hljs-class .hljs-title,
+.ce-code-cell .hljs-type { color: #7dff6a !important; }                  /* neon green (type/class) */
+
+.ce-code-cell .hljs-attr,
+.ce-code-cell .hljs-attribute,
+.ce-code-cell .hljs-variable,
+.ce-code-cell .hljs-variable.language_,
+.ce-code-cell .hljs-property,
+.ce-code-cell .hljs-template-variable { color: #b3a8ff !important; }   /* lavender */
+
+.ce-code-cell .hljs-built_in,
+.ce-code-cell .hljs-builtin-name { color: #4dd2ff !important; }
+
+.ce-code-cell .hljs-params { color: #e9eaff !important; }
+
+.ce-code-cell .hljs-meta,
+.ce-code-cell .hljs-punctuation,
+.ce-code-cell .hljs-operator,
+.ce-code-cell .hljs-symbol,
+.ce-code-cell .hljs-bullet { color: #9192c0 !important; }
+
+.ce-code-cell .hljs-tag { color: #00f0ff !important; }
+.ce-code-cell .hljs-name { color: #ff2b7a !important; }
+.ce-code-cell .hljs-attr { color: #b3a8ff !important; }
+
+/* Fallback tokenizer internal (tanpa CDN hljs) — samakan palet */
+.ce-kw  { color: #00f0ff !important; }
+.ce-str { color: #ff80ed !important; }
+.ce-cmt { color: #7c7cb5 !important; font-style: italic !important; }
+.ce-num { color: #fcee0a !important; }
+.ce-typ { color: #7dff6a !important; }
+.ce-fn  { color: #fcee0a !important; text-shadow: 0 0 6px rgba(252, 238, 10, 0.35); }
+
+/* ---------- 16. VERSION STRIP (Overview — ala sisik.eu/apk-tool) ---------- */
+.mp-ver-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: stretch;
+    margin: 12px 0 4px 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+.mp-ver-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 170px;
+    padding-right: 16px;
+    border-right: 1px solid var(--border-soft);
+}
+.mp-ver-label {
+    font-family: var(--font-display);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.mp-ver-big {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1.1;
+    color: var(--yellow-neon);
+    text-shadow: 0 0 10px rgba(252, 238, 10, 0.55), 0 0 28px rgba(252, 238, 10, 0.25);
+}
+.mp-ver-code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.mp-ver-tile {
+    flex: 1;
+    min-width: 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+}
+.mp-ver-tile-label {
+    font-family: var(--font-display);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.mp-ver-tile-value {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+    word-break: break-all;
+}
+.mp-ver-tile-sub {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .cp-glitch, .cp-glitch::before, .cp-glitch::after, .cp-ticker__track { animation: none !important; }
+    .cp-logo-word, .cp-logo-big, .cp-logo-rest { animation: none !important; }
+    .bgm-playing .bgm-bar { animation: none !important; }
+    body::after { display: none; }
+}
