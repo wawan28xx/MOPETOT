@@ -1350,8 +1350,10 @@ async def api_chat(scan_id: int, request: Request):
     if mode == "validate":
         module = (data.get("module") or "").strip()
         target = (data.get("target") or "").strip()
-        if not target:
-            raise HTTPException(400, "target is required for mode=validate")
+        # target opsional bila secret_id diberikan (fitur Validate Finding:
+        # agent memvalidasi temuan langsung dari daftar Secrets & Keys)
+        if not target and not secret_id:
+            raise HTTPException(400, "target or secret_id is required for mode=validate")
         validation_ctx = {"module": module, "target": target}
     elif not message:
         raise HTTPException(400, "message is required")
@@ -1381,14 +1383,28 @@ async def api_chat(scan_id: int, request: Request):
         if validation_ctx:
             module = validation_ctx["module"]
             target_raw = validation_ctx["target"]
+            # Validate Finding: tanpa target eksplisit -> pakai nilai temuan
+            if not target_raw and secret_row:
+                target_raw = str(secret_row.get("match") or "")
+                module = module or str(secret_row.get("category") or "").lower()
+            if not target_raw:
+                raise HTTPException(400, "target is required for mode=validate")
             target_masked = mask_secret(target_raw)
             evidence = ""
             if verifier_rows:
+                # pass 1: module + target persis
                 for row in verifier_rows:
                     if row.get("module") == module and (row.get("target") or "") == target_raw:
                         ev = re.sub(r"<[^>]+>", " ", row.get("result_html") or "")
                         evidence = re.sub(r"\s+", " ", ev).strip()[:600]
                         break
+                # pass 2: target saja (module penamaan beda, mis. google vs google-api)
+                if not evidence:
+                    for row in verifier_rows:
+                        if (row.get("target") or "") == target_raw:
+                            ev = re.sub(r"<[^>]+>", " ", row.get("result_html") or "")
+                            evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+                            break
             # fallback: temukan evidence via secret match bila row target tidak persis
             if not evidence and secret_row:
                 ev = re.sub(r"<[^>]+>", " ", str(secret_row.get("context") or ""))

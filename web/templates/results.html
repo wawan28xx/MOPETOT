@@ -1462,6 +1462,36 @@ function loadLiveVerifier() {
     let html = '';
 
     // ==========================================
+    // 🤖 VALIDATE FINDING (AGENT AI) — di atas PoC Generator
+    // ==========================================
+    const vfCandidates = (globalSecrets || []).filter(function(s) {
+        const sev = String(s.severity || '').toUpperCase();
+        return sev === 'CRITICAL' || sev === 'HIGH';
+    });
+    html += '<div class="section-block" style="border-left:4px solid #ff00ea; margin-bottom:24px;">';
+    html += '<div class="section-title-static" style="background:rgba(255,0,234,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">';
+    html += '<span style="color:#ff00ea; font-weight:800; font-size:16px;">🤖 Validate Finding (Agent AI)</span>';
+    html += '<span class="section-count">' + vfCandidates.length + '</span>';
+    html += '</div>';
+    html += '<div class="section-content">';
+    html += '<p class="subtitle" style="margin-bottom:12px;">Agent memvalidasi temuan Secrets &amp; Keys satu per satu: valid / tidak valid, sejauh mana exploitability-nya (mis. encrypt key \u2192 data apa yang bisa dibuka), lalu menetapkan verdict + severity P1\u2013P5 sesuai verification playbook:</p>';
+    if (vfCandidates.length > 0) {
+        html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px;">';
+        html += '<select id="vf-finding-select" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; max-width:520px; font-family:var(--font-mono);">';
+        vfCandidates.slice(0, 100).forEach(function(s) {
+            const label = '[' + String(s.severity || '?').toUpperCase() + '] ' + escHtml(s.rule_id || s.category || 'finding') + ' \u2014 ' + escHtml(String(s.file_path || '?').split('/').pop()) + ':' + escHtml(String(s.line_number || '?'));
+            html += '<option value="' + s.id + '">' + label + '</option>';
+        });
+        html += '</select>';
+        html += '<button class="btn btn-sm btn-primary" id="vf-run-btn" onclick="runFindingValidation()" style="display:flex; align-items:center; gap:6px;">🤖 Validate Finding</button>';
+        html += '</div>';
+        html += '<div id="vf-result"></div>';
+    } else {
+        html += '<p class="empty" style="padding:16px;">Tidak ada temuan CRITICAL/HIGH pada Secrets &amp; Keys untuk divalidasi agent.</p>';
+    }
+    html += '</div></div>';
+
+    // ==========================================
     // ⚡ AUTOMATED POC GENERATOR SECTION (TOP)
     // ==========================================
     html += '<div class="section-block" style="border-left:4px solid var(--accent); margin-bottom:24px;">';
@@ -2628,6 +2658,62 @@ function triggerValidateAgent(module, idx) {
         if (t) t.remove();
         assistantMessages.push({role: 'assistant', content: '❌ Gagal terhubung ke server.'});
         renderAssistantMessages();
+    });
+}
+
+/* ---------- VALIDATE FINDING (Agent AI, seksi atas PoC Generator) ---------- */
+function vfVerdictBadge(reply) {
+    var vm = reply.match(/VERDICT[^A-Za-z]*(CONFIRMED|LIKELY|UNCONFIRMED)/i)
+          || reply.match(/\b(CONFIRMED|LIKELY|UNCONFIRMED)\b/i);
+    if (!vm) return '';
+    var v = vm[1].toUpperCase();
+    var color = v === 'CONFIRMED' ? '#ff2d55' : (v === 'LIKELY' ? '#fcee0a' : '#00f0ff');
+    return '<span style="display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:1px; color:' + color + '; border:1px solid ' + color + '; background:' + color + '1a;">VERDICT: ' + v + '</span>';
+}
+
+function vfSeverityBadge(reply) {
+    var sm = reply.match(/SEVERITY[^P\d]*P([1-5])/i) || reply.match(/\bP([1-5])\b/);
+    if (!sm) return '';
+    var p = parseInt(sm[1], 10);
+    var colors = {1: '#ff2d55', 2: '#ff8a00', 3: '#fcee0a', 4: '#00f0ff', 5: '#5b5d8a'};
+    var c = colors[p] || '#5b5d8a';
+    return '<span style="display:inline-block; margin-left:8px; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:1px; color:' + c + '; border:1px solid ' + c + '; background:' + c + '1a;">SEVERITY: P' + p + '</span>';
+}
+
+function runFindingValidation() {
+    var sel = document.getElementById('vf-finding-select');
+    var res = document.getElementById('vf-result');
+    var btn = document.getElementById('vf-run-btn');
+    if (!sel || !sel.value || !res) return;
+    var sid = parseInt(sel.value, 10);
+    var sec = null;
+    for (var i = 0; i < globalSecrets.length; i++) {
+        if (globalSecrets[i].id === sid) { sec = globalSecrets[i]; break; }
+    }
+    btn.disabled = true;
+    var label = sec ? ((sec.rule_id || sec.category || 'finding') + ' @ ' + String(sec.file_path || '?').split('/').pop() + ':' + (sec.line_number || '?')) : 'finding #' + sid;
+    res.innerHTML = '<div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--bg-card); font-size:13px; color:var(--text-secondary);"><span class="inline-block animate-pulse">⏳ Agent memvalidasi ' + escHtml(label) + ' — membaca playbook + evidence... (bisa 10-60 detik)</span></div>';
+    fetch('/api/scan/' + SCAN_ID + '/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'validate', secret_id: sid})
+    })
+    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+    .then(function(out) {
+        btn.disabled = false;
+        if (out.ok && out.j.reply) {
+            var badges = vfVerdictBadge(out.j.reply) + vfSeverityBadge(out.j.reply);
+            res.innerHTML = '<div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--bg-card);">'
+                + '<div style="margin-bottom:10px;">' + (badges || '') + '</div>'
+                + '<pre style="margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--font-mono); font-size:12px; line-height:1.6; color:var(--text-primary);">' + escHtml(out.j.reply) + '</pre>'
+                + '</div>';
+        } else {
+            res.innerHTML = '<div style="border:1px solid #ff2d55; border-radius:10px; padding:14px; background:var(--bg-card); color:#ff2d55; font-size:13px;">❌ ' + escHtml((out.j && (out.j.detail || out.j.error)) || 'Gagal validasi.') + '</div>';
+        }
+    })
+    .catch(function() {
+        btn.disabled = false;
+        res.innerHTML = '<div style="border:1px solid #ff2d55; border-radius:10px; padding:14px; background:var(--bg-card); color:#ff2d55; font-size:13px;">❌ Gagal terhubung ke server.</div>';
     });
 }
 
