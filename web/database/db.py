@@ -150,7 +150,7 @@ async def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_chat_history_scan_secret
-            ON chat_history(scan_id, secret_id);>>>>>>> 23e02dc (feat: AI chatbox (vibe CLI), Code Explorer, FairPlay cryptid detection, PII rules cleanup)
+            ON chat_history(scan_id, secret_id);
         """)
         await db.commit()
         try:
