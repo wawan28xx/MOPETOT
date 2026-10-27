@@ -71,7 +71,7 @@ MAX_UPLOAD_BYTES = _positive_int_env(
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Mopetot", version="1.0.0")
+app = FastAPI(title="MOPETOT — Mobile Penetration Testing Otomation", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 

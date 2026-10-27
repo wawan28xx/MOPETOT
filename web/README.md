@@ -1,4 +1,4 @@
-# Mopetot — Web GUI
+# MOPETOT — Mobile Penetration Testing Otomation (Web GUI)
 
 Web-based interface untuk mobile application security audit. Upload APK/IPA, auto-scan, lihat hasil dalam dashboard.
 

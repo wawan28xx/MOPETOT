@@ -1,6 +1,7 @@
-# MOPETOT — Mobile Audit Tool
+# MOPETOT — Mobile Penetration Testing Otomation
 
-MOPETOT adalah toolkit reverse-engineering dan secret scanning untuk aplikasi
+**MOPETOT** adalah singkatan dari **Mo**bile **Pe**netration **T**esting **O**tomation —
+toolkit reverse-engineering dan secret scanning untuk aplikasi
 mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 
 - `mobile_audit.py`: CLI untuk menjalankan pipeline audit dan menghasilkan laporan JSON/HTML.
