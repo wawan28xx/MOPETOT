@@ -940,3 +940,29 @@ footer.footer { position: relative; z-index: 1; }
 }
 .vf-send-btn:hover { background: rgba(255, 0, 234, 0.3); }
 .vf-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.vf-divider {
+    align-self: center;
+    max-width: 100%;
+    margin: 4px 0;
+    padding: 4px 14px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #ff00ea;
+    font-family: var(--font-mono);
+    border: 1px dashed rgba(255, 0, 234, 0.5);
+    border-radius: 999px;
+    background: rgba(255, 0, 234, 0.06);
+    text-align: center;
+    word-break: break-all;
+}
+.vf-context {
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    border-top: 1px solid var(--border);
+    background: rgba(0, 240, 255, 0.04);
+    word-break: break-all;
+}

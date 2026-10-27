@@ -1474,7 +1474,7 @@ function loadLiveVerifier() {
     html += '<span class="section-count">' + vfCandidates.length + '</span>';
     html += '</div>';
     html += '<div class="section-content">';
-    html += '<p class="subtitle" style="margin-bottom:12px;">Agent memvalidasi temuan Secrets &amp; Keys: valid / tidak valid, sejauh mana exploitability-nya (mis. encrypt key \u2192 data apa yang bisa dibuka), lalu menetapkan verdict + severity P1\u2013P5 sesuai verification playbook. Setelah hasil keluar, lu bisa <b style="color:#00f0ff;">debat / arahkan agent langsung</b> lewat kotak chat di tiap temuan:</p>';
+    html += '<p class="subtitle" style="margin-bottom:12px;">Agent memvalidasi temuan Secrets &amp; Keys: valid / tidak valid, sejauh mana exploitability-nya (mis. encrypt key \u2192 data apa yang bisa dibuka), lalu menetapkan verdict + severity P1\u2013P5 sesuai verification playbook. Semua hasil masuk ke <b style="color:#00f0ff;">satu chat</b> di bawah — lu bisa debat / arahkan agent langsung di percakapan yang sama.</p>';
     if (vfCandidates.length > 0) {
         html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px;">';
         html += '<select id="vf-finding-select" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; max-width:520px; font-family:var(--font-mono);">';
@@ -1662,6 +1662,7 @@ function loadLiveVerifier() {
     html += '</div></div>';
 
     d.innerHTML = html;
+    vfEnsureThread();
     window._liveVerifierRenderedOnce = true;
     showTabData(6);
     rehydrateVerifierUI();
@@ -2687,8 +2688,47 @@ function vfFmt(text) {
     return escHtml(text).replace(/\*\*([^*]+)\*\*/g, '<b style="color:#00f0ff;">$1</b>');
 }
 
-function vfAppendMsg(sid, role, content, thinking) {
-    var msgs = document.getElementById('vf-msgs-' + sid);
+function vfContextLabel(sec) {
+    if (!sec) return 'umum (belum ada temuan divalidasi)';
+    return (sec.rule_id || sec.category || 'finding') + ' @ '
+        + String(sec.file_path || '?').split(/[\/\\]/).pop() + ':' + (sec.line_number || '?');
+}
+
+function vfFindSecret(sid) {
+    for (var i = 0; i < globalSecrets.length; i++) {
+        if (globalSecrets[i].id === sid) return globalSecrets[i];
+    }
+    return null;
+}
+
+/* SATU thread chat untuk semua temuan (konsep ChatGPT: satu percakapan) */
+function vfEnsureThread() {
+    if (document.getElementById('vf-msgs-main')) return;
+    var res = document.getElementById('vf-result');
+    if (!res) return;
+    var t = document.createElement('div');
+    t.className = 'vf-thread';
+    t.innerHTML = ''
+        + '<div class="vf-msgs" id="vf-msgs-main"></div>'
+        + '<div class="vf-context" id="vf-context">🧷 Konteks chat: umum (belum ada temuan divalidasi)</div>'
+        + '<div class="vf-input-row">'
+        + '<input id="vf-in" placeholder="Debat / arahkan agent... (Enter untuk kirim)" onkeydown="if(event.key===\'Enter\'){vfFollowUp();}">'
+        + '<button class="vf-send-btn" id="vf-send" onclick="vfFollowUp()">➤</button>'
+        + '</div>';
+    res.appendChild(t);
+    window._vfCurrentSid = window._vfCurrentSid || null;
+}
+
+function vfUpdateContext(sec) {
+    window._vfCurrentSid = sec ? sec.id : null;
+    var ctx = document.getElementById('vf-context');
+    if (ctx) ctx.innerHTML = '🧷 Konteks chat: <b style="color:#00f0ff;">' + vfFmt(vfContextLabel(sec)) + '</b>';
+    var input = document.getElementById('vf-in');
+    if (input) input.placeholder = 'Debat / arahkan agent soal ' + vfContextLabel(sec) + '... (Enter untuk kirim)';
+}
+
+function vfAppendMsg(role, content, thinking) {
+    var msgs = document.getElementById('vf-msgs-main');
     if (!msgs) return null;
     var div = document.createElement('div');
     div.className = role === 'user' ? 'vf-msg-user' : 'vf-msg-bot' + (thinking ? ' vf-thinking' : '');
@@ -2698,38 +2738,35 @@ function vfAppendMsg(sid, role, content, thinking) {
     return div;
 }
 
-function vfCreateThread(sec) {
-    var res = document.getElementById('vf-result');
-    var sid = sec.id;
-    var label = (sec.rule_id || sec.category || 'finding') + ' @ ' + String(sec.file_path || '?').split('/').pop() + ':' + (sec.line_number || '?');
-    var thread = document.createElement('div');
-    thread.className = 'vf-thread';
-    thread.innerHTML = ''
-        + '<div class="vf-thread-head">'
-        + '<span class="vf-thread-title">🔎 ' + escHtml(label) + '</span>'
-        + '<span id="vf-badges-' + sid + '"></span>'
-        + '</div>'
-        + '<div class="vf-msgs" id="vf-msgs-' + sid + '"></div>'
-        + '<div class="vf-input-row">'
-        + '<input id="vf-in-' + sid + '" placeholder="Debat / arahkan agent tentang temuan ini... (Enter untuk kirim)" onkeydown="if(event.key===\'Enter\'){vfFollowUp(' + sid + ');}">'
-        + '<button class="vf-send-btn" id="vf-send-' + sid + '" onclick="vfFollowUp(' + sid + ')">➤</button>'
-        + '</div>';
-    res.appendChild(thread);
-    return thread;
+function vfAppendDivider(label) {
+    var msgs = document.getElementById('vf-msgs-main');
+    if (!msgs) return;
+    var div = document.createElement('div');
+    div.className = 'vf-divider';
+    div.innerHTML = '🔎 <span>' + vfFmt(label) + '</span>';
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
 }
 
-function vfSetBadges(sid, reply) {
-    var holder = document.getElementById('vf-badges-' + sid);
-    if (holder) holder.innerHTML = vfVerdictBadge(reply) + vfSeverityBadge(reply);
+/* bubble hasil agent: badge verdict+severity inline di atas isi */
+function vfAppendResult(reply) {
+    var msgs = document.getElementById('vf-msgs-main');
+    if (!msgs) return;
+    var div = document.createElement('div');
+    div.className = 'vf-msg-bot';
+    var badges = vfVerdictBadge(reply) + vfSeverityBadge(reply);
+    div.innerHTML = (badges ? '<div style="margin-bottom:8px;">' + badges + '</div>' : '') + vfFmt(reply);
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
 }
 
 /* Live activity: jalankan job agent + poll log baris demi baris */
-async function vfRunAgentJob(sid, body, kindLabel) {
-    var msgs = document.getElementById('vf-msgs-' + sid);
-    if (!msgs) return {ok: false, err: 'thread tidak ditemukan.'};
+async function vfRunAgentJob(body, kindLabel) {
+    var msgs = document.getElementById('vf-msgs-main');
+    if (!msgs) return {ok: false, err: 'chat belum siap.'};
     var wrap = document.createElement('div');
     wrap.className = 'vf-msg-bot vf-thinking';
-    var logsId = 'vf-live-' + sid + '-' + Math.floor(Math.random() * 1000000);
+    var logsId = 'vf-live-' + Math.floor(Math.random() * 1000000);
     wrap.innerHTML = '<div style="font-weight:700; margin-bottom:6px;">⏳ ' + vfFmt(kindLabel) + '</div>'
         + '<div class="vf-logs" id="' + logsId + '"><div class="vf-log-line">[boot] menghubungi server job agent...</div></div>';
     msgs.appendChild(wrap);
@@ -2772,34 +2809,34 @@ async function vfRunAgentJob(sid, body, kindLabel) {
 }
 
 async function vfRunOne(sec) {
-    var sid = sec.id;
-    vfCreateThread(sec);
-    var out = await vfRunAgentJob(sid, {mode: 'validate', secret_id: sid},
+    vfEnsureThread();
+    vfUpdateContext(sec);
+    vfAppendDivider('Validasi: ' + vfContextLabel(sec));
+    var out = await vfRunAgentJob({mode: 'validate', secret_id: sec.id},
         'Agent memvalidasi temuan — live activity di balik layar:');
     if (out.ok) {
-        vfSetBadges(sid, out.reply);
-        vfAppendMsg(sid, 'bot', out.reply);
+        vfAppendResult(out.reply);
     } else {
-        vfAppendMsg(sid, 'bot', '❌ ' + out.err);
+        vfAppendMsg('bot', '❌ ' + out.err);
     }
 }
 
-async function vfFollowUp(sid) {
-    var input = document.getElementById('vf-in-' + sid);
-    var send = document.getElementById('vf-send-' + sid);
+async function vfFollowUp() {
+    var input = document.getElementById('vf-in');
+    var send = document.getElementById('vf-send');
     var msg = (input && input.value || '').trim();
     if (!msg || (send && send.disabled)) return;
     input.value = '';
     input.disabled = true;
     if (send) send.disabled = true;
-    vfAppendMsg(sid, 'user', msg);
-    var out = await vfRunAgentJob(sid, {mode: 'chat', secret_id: sid, message: msg},
-        'Agent mikir — live activity di balik layar:');
+    vfAppendMsg('user', msg);
+    var body = {mode: 'chat', message: msg};
+    if (window._vfCurrentSid) body.secret_id = window._vfCurrentSid;
+    var out = await vfRunAgentJob(body, 'Agent mikir — live activity di balik layar:');
     if (out.ok) {
-        vfSetBadges(sid, out.reply);
-        vfAppendMsg(sid, 'bot', out.reply);
+        vfAppendResult(out.reply);
     } else {
-        vfAppendMsg(sid, 'bot', '❌ ' + out.err);
+        vfAppendMsg('bot', '❌ ' + out.err);
     }
     input.disabled = false;
     if (send) send.disabled = false;
@@ -2818,21 +2855,19 @@ async function runFindingValidation() {
     if (sel.value === 'all') {
         list = vfCandidates.slice(0, 20);
     } else {
-        var sid = parseInt(sel.value, 10);
-        for (var i = 0; i < globalSecrets.length; i++) {
-            if (globalSecrets[i].id === sid) { list = [globalSecrets[i]]; break; }
-        }
+        var sec = vfFindSecret(parseInt(sel.value, 10));
+        if (sec) list = [sec];
     }
     if (!list.length) return;
 
+    vfEnsureThread();
     window._vfStop = false;
-    res.innerHTML = '';
     btn.disabled = true;
     if (stopBtn) stopBtn.style.display = 'inline-flex';
 
     var prog = document.createElement('div');
     prog.className = 'vf-progress';
-    res.appendChild(prog);
+    res.insertBefore(prog, res.firstChild);
     var truncated = (sel.value === 'all' && vfCandidates.length > 20)
         ? ' (dicap 20 temuan pertama)' : '';
 
@@ -2841,7 +2876,7 @@ async function runFindingValidation() {
         prog.innerHTML = '🤖 Validasi ' + (k + 1) + '/' + list.length + truncated + ' — ' + escHtml(list[k].rule_id || 'finding') + '...';
         await vfRunOne(list[k]);
     }
-    if (!window._vfStop) prog.innerHTML = '✅ Selesai: ' + list.length + ' temuan divalidasi' + truncated + '. Scroll tiap kartu untuk debat / arahkan agent.';
+    if (!window._vfStop) prog.innerHTML = '✅ Selesai: ' + list.length + ' temuan divalidasi' + truncated + '. Lanjut debat / arahkan agent di chat bawah.';
     btn.disabled = false;
     if (stopBtn) stopBtn.style.display = 'none';
 }
