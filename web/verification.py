@@ -558,3 +558,156 @@ def check_generic_endpoint(url_str: str) -> Dict[str, Any]:
             "body_preview": "",
             "message": f"Koneksi gagal / Timeout ({str(e)[:60]})"
         }
+
+
+def check_credential_login(url_str: str, username: str, password: str,
+                           timeout: float = 10.0) -> Dict[str, Any]:
+    """Uji login hardcoded credential secara NON-DESTRUKTIF (read-only setelah auth).
+
+    Coba 3 meta umum (JSON POST / form POST / Basic auth GET) dan nilai hasilnya:
+      - VALID_LOGIN    : 2xx + token/session di respons (access_token, eyJ, Set-Cookie)
+      - LIKELY_VALID  : 2xx dengan respons berbeda dari baseline tanpa auth
+      - INVALID       : 401/403 di semua metode
+      - INCONCLUSIVE  : 2xx tapi respons identik baseline (halaman sama, tanpa token)
+      - ERROR         : koneksi gagal / bukan http(s)
+    Tidak ada operasi write/CRUD data — hanya endpoint login itu sendiri.
+    """
+    url = (url_str or "").strip()
+    username = (username or "").strip()
+    password = (password or "").strip()
+
+    result = {
+        "url": url,
+        "username": username,
+        "verdict": "",
+        "summary": "",
+        "attempts": [],
+        "baseline_len": None,
+        "evidence": "",
+        "raw_response": "",
+    }
+
+    if not url.startswith(("http://", "https://")):
+        result["verdict"] = "ERROR"
+        result["summary"] = "URL harus diawali http:// atau https://"
+        return result
+    if not username or not password:
+        result["verdict"] = "ERROR"
+        result["summary"] = "Username dan password wajib diisi."
+        return result
+
+    def _try(label: str, http_method: str, req_kwargs: dict) -> Dict[str, Any]:
+        att = {"method": label, "status": None, "ok": False, "detail": ""}
+        try:
+            r = requests.request(http_method, url, timeout=timeout, verify=False, **req_kwargs)
+            att["status"] = r.status_code
+            body = r.text or ""
+            att["ok"] = 200 <= r.status_code < 300
+            set_cookie = r.headers.get("Set-Cookie", "")
+            token_hit = any(marker in body.lower() for marker in
+                            ("access_token", "id_token", "refresh_token", "\"token\"",
+                             "authorization", "bearer ", "eyj"))
+            cookie_hit = any(m in set_cookie.lower() for m in
+                             ("session", "token", "auth", "sid"))
+            att["token_hit"] = token_hit or cookie_hit
+            att["body_len"] = len(body)
+            att["body_head"] = body[:300]
+            return att
+        except requests.exceptions.Timeout:
+            att["detail"] = "timeout"
+            return att
+        except requests.exceptions.SSLError as e:
+            att["detail"] = f"ssl: {str(e)[:80]}"
+            return att
+        except requests.exceptions.ConnectionError as e:
+            att["detail"] = f"connection: {str(e)[:100]}"
+            return att
+        except Exception as e:
+            att["detail"] = f"error: {str(e)[:100]}"
+            return att
+
+    # baseline tanpa kredensial (GET) — pembanding respons
+    base = _try("GET-baseline", "GET", {"headers": HEADERS})
+    result["baseline_len"] = base.get("body_len")
+
+    attempts = []
+    # 1. JSON POST (username / email variants)
+    for key in ("username", "email", "user"):
+        att = _try(f"json:{key}", "POST", {
+            "headers": {**HEADERS, "Content-Type": "application/json"},
+            "data": json.dumps({key: username, "password": password}),
+        })
+        att["cred_key"] = key
+        attempts.append(att)
+        if att.get("status") in (200, 201) and att.get("token_hit"):
+            break
+    # 2. Form POST
+    attempts.append(_try("form", "POST", {
+        "headers": {**HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
+        "data": f"username={username}&password={password}",
+    }))
+    # 3. Basic auth GET
+    import base64 as _b64
+    basic = _b64.b64encode(f"{username}:{password}".encode()).decode()
+    attempts.append(_try("basic", "GET", {
+        "headers": {**HEADERS, "Authorization": "Basic " + basic},
+    }))
+    result["attempts"] = [{k: v for k, v in a.items() if k not in ("body_head",)}
+                          for a in attempts]
+
+    def _fmt(a):
+        return f"{a['method']} -> HTTP {a.get('status')}{(' [' + a['detail'] + ']') if a.get('detail') else ''}"
+
+    # nilai verdict
+    base_status = base.get("status")
+    reached = [a for a in attempts if a.get("status") is not None]
+    ok2xx = [a for a in attempts if a.get("ok")]
+
+    # VALID #1: respons 2xx mengandung token/session
+    valid = next((a for a in ok2xx if a.get("token_hit")), None)
+    # VALID #2: endpoint terproteksi auth (baseline 401/403) tapi 2xx DENGAN kredensial
+    if not valid and base_status in (401, 403):
+        valid = next((a for a in ok2xx if a.get("status") in (200, 201)), None)
+    # LIKELY: 2xx dan respons jelas beda dari baseline 2xx
+    likely = next((a for a in ok2xx
+                   if base_status not in (401, 403)
+                   and a.get("body_len") is not None
+                   and base.get("body_len") is not None
+                   and abs(a["body_len"] - base["body_len"]) > 50), None)
+    # INVALID: tidak ada 2xx sama sekali dan ada 401/403 eksplisit
+    invalid_all = (not ok2xx) and any(a.get("status") in (401, 403) for a in reached)
+
+    if valid:
+        result["verdict"] = "VALID_LOGIN"
+        result["summary"] = f"🚨 CRITICAL: Login BERHASIL via {valid['method']} — kredensial aktif (token/session terdeteksi)."
+        result["raw_response"] = valid.get("body_head", "")
+        result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+    elif likely:
+        result["verdict"] = "LIKELY_VALID"
+        result["summary"] = f"⚠️ Kredensial KEMUNGKINAN valid via {likely['method']} — respons beda dari baseline, tapi tanpa token eksplisit. Cek manual."
+        result["raw_response"] = likely.get("body_head", "")
+        result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+    elif invalid_all:
+        result["verdict"] = "INVALID"
+        result["summary"] = ("🔒 Kredensial DITOLAK (401/403 diterima, tidak ada yang lolos) — invalid/revoked/akun disabled. "
+                          "Catatan: 405 = endpoint dengan method berbeda — cek apakah ini endpoint login yang benar.")
+        result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+    else:
+        ok_any = next((a for a in attempts if a.get("ok")), None)
+        if ok_any:
+            result["verdict"] = "INCONCLUSIVE"
+            result["summary"] = (f"Endpoint merespons 2xx via {ok_any['method']} tapi respons mirip baseline "
+                                  "(tanpa token/session terdeteksi). Bukan endpoint login, atau login via mekanisme lain (OTP/dynamic fields).")
+            result["raw_response"] = ok_any.get("body_head", "")
+            result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+        else:
+            statuses = sorted({a.get("status") for a in attempts if a.get("status")})
+            if not statuses:
+                result["verdict"] = "ERROR"
+                result["summary"] = "Endpoint tidak dapat dijangkau (timeout/koneksi gagal)."
+                result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+            else:
+                result["verdict"] = "INCONCLUSIVE"
+                result["summary"] = f"Respons tidak meyakinkan (status: {statuses}). Cek endpoint & format payload manual."
+                result["evidence"] = "; ".join(_fmt(a) for a in attempts)
+    return result

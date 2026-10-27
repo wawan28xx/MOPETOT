@@ -11,12 +11,12 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 
 - **Multi-format**: APK, AAB, XAPK/APKS/APKM, IPA, JAR, DEX/SMALI, SO, DLL/EXE (.NET via ilspycmd), HBC (Hermes), ZIP, dan direktori hasil ekstraksi.
 - **Pipeline empat tahap**: Identify → Unpack → Scan → Report.
-- **Secret scanning** berbasis regex dari `rules/secrets.json` (rule PEM mensyaratkan body base64 — header tanpa isi tidak dilaporkan).
+- **Secret scanning** berbasis regex dari `rules/secrets.json` (rule PEM mensyaratkan body base64 — header tanpa isi tidak dilaporkan). Rule endpoint memakai filter host 3rd-party/dokumentasi + dedupe global (973 noise → 10 endpoint bermakna pada uji APK nyata).
 - **iOS**: deteksi binary terenkripsi FairPlay (`cryptid`) — hasil strings/symbol pada binary terenkripsi ditandai sebagai partial.
 - **Code Explorer**: browser corpus hasil decompile ala VS Code (syntax highlighting, grep ripgrep, find-in-file ala jadx-gui).
 - **Verification Assistant**: AI chatbox via vibe CLI lokal — nilai secret dikirim **utuh (tanpa masking)** untuk membantu validasi manual pentester pada audit berizin.
 - **Login auth**: seluruh halaman & API diproteksi session cookie.
-- **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
+- **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook, **Credential Login Tester** (uji login non-destruktif: JSON/form/Basic → VALID/LIKELY/INVALID) — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
 - **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih satu temuan CRITICAL/HIGH atau **Validate Semua** (default) dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5. Semua hasil masuk ke **satu chat** (konsep ChatGPT): divider per temuan, badge verdict/severity inline, dan pentester bisa debat / mengarahkan ulang agent di percakapan yang sama (konteks otomatis nyambung ke temuan terakhir yang divalidasi).
 - **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, temuan + target, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).

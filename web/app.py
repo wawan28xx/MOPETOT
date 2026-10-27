@@ -32,7 +32,7 @@ from database.db import (
 
 from verification import (
     check_ip_details, check_firebase_crud, check_google_api_key, check_generic_endpoint,
-    check_aws_sts_identity, check_stripe_key, check_webhook_status
+    check_aws_sts_identity, check_stripe_key, check_webhook_status, check_credential_login
 )
 
 from poc_engine import PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION
@@ -1209,6 +1209,21 @@ async def api_verify_stripe(scan_id: int, request: Request):
     if not key:
         raise HTTPException(400, "Stripe Key is required")
     result = await asyncio.to_thread(check_stripe_key, key)
+    return JSONResponse(result)
+
+
+@app.post("/api/scan/{scan_id}/verify/credentials")
+async def api_verify_credentials(scan_id: int, request: Request):
+    """Uji login hardcoded credential NON-DESTRUKTIF (JSON/form/Basic, read-only)."""
+    data = await request.json()
+    url = data.get("url", "")
+    username = data.get("username", "")
+    password = data.get("password", "")
+    if not url:
+        raise HTTPException(400, "URL is required")
+    if not username or not password:
+        raise HTTPException(400, "username and password are required")
+    result = await asyncio.to_thread(check_credential_login, url, username, password)
     return JSONResponse(result)
 
 

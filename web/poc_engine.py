@@ -751,7 +751,10 @@ except Exception as e:
             "title": "Generic Credential — Request Scaffold",
             "language": "python",
             "mode": "TEMPLATE",
-            "description": "Scaffold login/API test. Identifikasi endpoint via Code Explorer (grep nama variable di corpus), isi TARGET, lalu eksekusi. Lanjut reasoning pakai chat agent jika bingung.",
+            "description": ("Scaffold login/API test. Identifikasi endpoint via Code Explorer "
+                            "(grep nama variable di corpus), lalu jalankan lewat Live Verifier "
+                            "-> Credential Login Tester (uji non-destruktif otomatis), atau isi TARGET di script ini. "
+                            "Lanjut reasoning pakai chat agent jika bingung."),
             "code": code.replace("__VALUE__", match).replace("__RULE__", str(secret.get("rule_id") or "-")),
         }
 

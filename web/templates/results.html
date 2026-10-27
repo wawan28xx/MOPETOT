@@ -1650,6 +1650,28 @@ function loadLiveVerifier() {
     }
     html += '</div></div>';
 
+    // 6. Credential Login Tester (hardcoded user:pass -> uji login non-destruktif)
+    const credPairs = extractCredPairs();
+    html += '<div class="section-block"><div class="section-title-static"><span>🔐 Credential Login Tester</span> <span class="section-count">' + credPairs.length + ' pair</span></div>';
+    html += '<div class="section-content">';
+    html += '<p class="subtitle" style="margin-bottom:12px;">Uji login hardcoded credential secara <b style="color:#00f0ff;">non-destruktif</b> (JSON / form / Basic auth, read-only setelah auth). Isi endpoint dari corpus lalu Test Login — hasil menentukan verdict temuan (CONFIRMED/UNCONFIRMED).</p>';
+    html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">';
+    if (credPairs.length > 0) {
+        html += '<select id="cred-pair-select" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono);" onchange="fillCredPair(this.value)">';
+        html += '<option value="">— Pilih pair dari temuan —</option>';
+        credPairs.forEach(function(pr, idx) {
+            html += '<option value="' + idx + '">' + escHtml(pr.label) + '</option>';
+        });
+        html += '</select>';
+    }
+    html += '<input id="cred-url" placeholder="https://endpoint-login-dari-corpus/api/login" style="flex:1; min-width:260px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono);">';
+    html += '<input id="cred-user" placeholder="username" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono); width:140px;">';
+    html += '<input id="cred-pass" placeholder="password" type="text" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono); width:170px;">';
+    html += '<button class="btn-verify" id="btn_cred_login" onclick="runCredLoginTest()">▶ Test Login</button>';
+    html += '</div>';
+    html += '<div id="res_cred_login" style="margin-top:12px;"></div>';
+    html += '</div></div>';
+
     // 6. Host Potensial (Dev / Staging / Internal) Health Check
     html += '<div class="section-block"><div class="section-title-static"><span>⚠️ Host Potensial (Dev / Staging) Endpoint Prober</span> <span class="section-count">' + potentialEndpoints.length + '</span></div>';
     html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
@@ -2693,6 +2715,89 @@ function triggerValidateAgent(module, idx) {
         if (t) t.remove();
         assistantMessages.push({role: 'assistant', content: '❌ Gagal terhubung ke server.'});
         renderAssistantMessages();
+    });
+}
+
+/* ---------- CREDENTIAL LOGIN TESTER (uji login non-destruktif) ---------- */
+function extractCredPairs() {
+    var pairs = [];
+    (globalSecrets || []).forEach(function(s) {
+        if (String(s.rule_id || '') !== 'login_credential_pair') return;
+        var ctx = String(s.context || '') + '\n' + String(s.match || '');
+        var userM = ctx.match(/"(username[^"]*)"\s*:\s*"([^"]+)"/i);
+        var passM = ctx.match(/"(password[^"]*)"\s*:\s*"([^"]+)"/i);
+        if (userM && passM) {
+            var file = String(s.file_path || '').split(/[\/\\]/).pop();
+            pairs.push({
+                label: (userM[1] + '=' + userM[2] + ' / ' + passM[1] + '=*** @ ' + file + ':' + (s.line_number || '?')).substring(0, 90),
+                username: userM[2],
+                password: passM[2],
+            });
+        }
+    });
+    return pairs;
+}
+
+function fillCredPair(idx) {
+    var pairs = extractCredPairs();
+    var pr = pairs[parseInt(idx, 10)];
+    if (!pr) return;
+    var u = document.getElementById('cred-user');
+    var p = document.getElementById('cred-pass');
+    if (u) u.value = pr.username;
+    if (p) p.value = pr.password;
+}
+
+function runCredLoginTest() {
+    var urlEl = document.getElementById('cred-url');
+    var userEl = document.getElementById('cred-user');
+    var passEl = document.getElementById('cred-pass');
+    var btn = document.getElementById('btn_cred_login');
+    var res = document.getElementById('res_cred_login');
+    if (!urlEl || !res) return;
+    var url = (urlEl.value || '').trim();
+    var user = (userEl && userEl.value || '').trim();
+    var pass = (passEl && passEl.value || '').trim();
+    if (!url || !user || !pass) {
+        res.innerHTML = '<span style="color:#fcee0a; font-size:12px;">⚠ URL, username, dan password wajib diisi.</span>';
+        return;
+    }
+    btn.disabled = true;
+    btn.innerText = '⏳ Testing...';
+    res.innerHTML = '<span style="color:var(--text-muted); font-size:12px;" class="inline-block animate-pulse">⏳ Menguji login (JSON / form / Basic)...</span>';
+    fetch('/api/scan/' + SCAN_ID + '/verify/credentials', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ url: url, username: user, password: pass })
+    })
+    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+    .then(function(out) {
+        btn.disabled = false;
+        btn.innerText = '▶ Test Login';
+        if (!out.ok) {
+            res.innerHTML = '<span style="color:#ff2d55; font-size:12px;">❌ ' + escHtml((out.j && (out.j.detail || out.j.error)) || 'Gagal.') + '</span>';
+            return;
+        }
+        var d = out.j;
+        var color = d.verdict === 'VALID_LOGIN' ? '#ff2d55' :
+                    (d.verdict === 'LIKELY_VALID' ? '#fcee0a' :
+                     (d.verdict === 'INVALID' ? '#00f0ff' : '#5b5d8a'));
+        var html = '<div style="border:1px solid ' + color + '; border-radius:10px; padding:12px; background:var(--bg-card);">';
+        html += '<span class="res-badge" style="color:' + color + '; border:1px solid ' + color + ';">' + escHtml(d.verdict || '-') + '</span> ';
+        html += '<span style="font-size:12px; color:var(--text-primary);">' + escHtml(d.summary || '') + '</span>';
+        if (d.evidence) {
+            html += '<pre style="margin:10px 0 0; white-space:pre-wrap; word-break:break-word; font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);">' + escHtml(d.evidence) + '</pre>';
+        }
+        if (d.raw_response) {
+            html += '<pre style="margin:8px 0 0; white-space:pre-wrap; word-break:break-word; font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">' + escHtml(String(d.raw_response).substring(0, 400)) + '</pre>';
+        }
+        html += '</div>';
+        res.innerHTML = html;
+    })
+    .catch(function() {
+        btn.disabled = false;
+        btn.innerText = '▶ Test Login';
+        res.innerHTML = '<span style="color:#ff2d55; font-size:12px;">❌ Gagal terhubung ke server.</span>';
     });
 }
 

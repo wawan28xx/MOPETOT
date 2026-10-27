@@ -8,6 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from engines.common import is_library_source
+from engines.endpoint_analyzer import _is_third_party
 
 
 def _verify_base64_creds(s):
@@ -45,6 +46,32 @@ def _verify_base64_creds(s):
 VERIFIERS = {
     "base64_creds": _verify_base64_creds,
 }
+
+
+# ---------------- URL endpoint filter (anti noise) ----------------
+# Rule kategori Endpoints dulunya mencatat SEMUA URL — termasuk namespace XML
+# (schemas.android.com), domain dokumentasi library (flutter.dev), CDN, dan
+# tracker. Host 3rd-party dibuang; host internal/localhost DIPERTAHANKAN.
+_URL_HOST_RE = re.compile(r"(?i)\bhttps?://([a-z0-9._-]+)(?::\d{1,5})?")
+
+
+def _verify_url_target(s):
+    """True jika URL layak dilaporkan sebagai endpoint (bukan 3rd-party/docs).
+    Match tanpa host (path relatif /api/...) dibiarkan lolos — rule menilai sendiri.
+    """
+    m = _URL_HOST_RE.search(s or "")
+    if not m:
+        return True
+    host = m.group(1).lower().strip(".")
+    if not host or "." not in host:
+        return True  # bukan hostname (mis. http://localhost tanpa domain)
+    if host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("10.") \
+            or host.startswith("192.168.") or host.startswith("172."):
+        return True  # endpoint internal = bernilai tinggi
+    return not _is_third_party(host)
+
+
+VERIFIERS["url_target"] = _verify_url_target
 
 
 DEFAULT_RULES = Path(__file__).resolve().parent / "rules" / "secrets.json"
@@ -94,6 +121,9 @@ class Rule:
             self.skip_paths.append(sp.lower())
         # Cap jumlah match per baris untuk rule bising (mis. data chart / minified JS)
         self.line_cap = int(data.get("line_cap") or 0)
+        # Dedupe global: rule bising (mis. http_url) cukup dilaporkan sekali
+        # per nilai unik di seluruh corpus (bukan per-file berulang).
+        self.dedupe = bool(data.get("dedupe"))
 
     def to_dict(self):
         return {
@@ -255,6 +285,25 @@ def scan_corpus(corpus_dir: Path, rules, quiet=False, workers=None):
             done += fcount
             if done % max(1, total // 10) < fcount or done >= total:
                 _report_progress(min(done, total))
+
+    # Dedupe global untuk rule yang ditandai (mis. http_url): satu nilai unik
+    # cukup dilaporkan sekali di seluruh corpus — file berulang tidak menambah noise.
+    before = len(findings)
+    seen = set()
+    out = []
+    for f in findings:
+        if not f.rule.dedupe:
+            out.append(f)
+            continue
+        norm = re.sub(r"[?#].*$", "", (f.match or "").strip().rstrip("/")).lower()
+        key = (f.rule.id, norm)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    findings = out
+    if before != len(findings) and not quiet:
+        print(f"  [>] Dedupe global rule bising: {before} -> {len(findings)} temuan", flush=True)
     return findings, stats
 
 

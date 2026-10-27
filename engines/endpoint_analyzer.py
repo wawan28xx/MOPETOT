@@ -53,6 +53,13 @@ THIRD_PARTY = {
     "adyen.com", "boku.com", "firebasedatabase.app", "supabase.co", "browserstack.com",
     "chrome.com", "chromium.org", "w3schools.com", "gmpg.org", "creativecommons.org",
     "android.googlesource.com", "webrtc.org", "ffmpeg.org", "libpng.org", "zlib.net",
+    # dokumentasi framework & spec yang bikin noise di hasil scan (bukan surface target)
+    "flutter.dev", "dart.dev", "pub.dev", "pub.dartlang.org", "material.io",
+    "api.flutter.dev", "docs.flutter.dev", "sqlite.org", "xmlpull.org", "json.org",
+    "xml.org", "kotlinlang.org", "gradle.org", "jetbrains.com", "bouncycastle.org",
+    "spring.io", "quarkus.io", "reactjs.org", "react.dev", "vuejs.org", "nextjs.org",
+    "nodejs.org", "deno.com", "golang.org", "go.dev", "python.org", "rust-lang.org",
+    "developer.mozilla.org", "openssl.org", "libxml.org", "unicode.org", "rfc-editor.org",
 }
 
 ENV_LABELS = ("dev", "staging", "stg", "sandbox", "test", "qa", "uat", "beta", "preprod", "preview", "canary")

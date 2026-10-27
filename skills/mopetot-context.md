@@ -19,7 +19,13 @@ plan lateral movement — always inside authorized scope.
 
 ## Live Verifier (deterministic checks the hunter runs)
 Modules: Firebase CRUD, Google API scopes (10 endpoints), AWS STS
-GetCallerIdentity, Stripe, webhooks, endpoint probe, IP/GeoIP.
+GetCallerIdentity, Stripe, webhooks, endpoint probe, IP/GeoIP, and
+Credential Login Tester (non-destructive: JSON / form / Basic attempts,
+verdicts VALID_LOGIN / LIKELY_VALID / INVALID / INCONCLUSIVE / ERROR).
+For hardcoded credential pairs (login_credential_pair), ask the hunter to
+run the Credential Login Tester against the login endpoint found in the
+corpus — a 401/403 there means invalid/revoked; 2xx with token means
+CONFIRMED critical.
 Verifier output is ground truth — cite it. If a verifier has not been run,
 ask the hunter to run it (or propose what it would show).
 
