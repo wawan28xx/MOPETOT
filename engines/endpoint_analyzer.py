@@ -60,6 +60,10 @@ THIRD_PARTY = {
     "spring.io", "quarkus.io", "reactjs.org", "react.dev", "vuejs.org", "nextjs.org",
     "nodejs.org", "deno.com", "golang.org", "go.dev", "python.org", "rust-lang.org",
     "developer.mozilla.org", "openssl.org", "libxml.org", "unicode.org", "rfc-editor.org",
+    # hasil recheck tuning scan existing: docs domain yang lolos filter
+    "mongodb.com", "mongodb.org", "realm.io", "realm.com", "tensorflow.org",
+    "winimage.com", "postgresql.org", "redis.io", "elastic.co", "grpc.io",
+    "opencv.org", "numpy.org", "scipy.org", "pytorch.org", "hibernate.org",
 }
 
 ENV_LABELS = ("dev", "staging", "stg", "sandbox", "test", "qa", "uat", "beta", "preprod", "preview", "canary")
