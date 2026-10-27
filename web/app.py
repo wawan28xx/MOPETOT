@@ -35,7 +35,7 @@ from verification import (
 )
 
 from poc_engine import PoCEngine
-from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, mask_secret, agent_job_new, agent_job_get, agent_job_finish, make_logger
+from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, agent_job_new, agent_job_get, agent_job_finish, make_logger
 import code_explorer as ce
 
 logger = logging.getLogger(__name__)
@@ -1336,11 +1336,12 @@ async def api_ce_search(scan_id: int, q: str = "", regex: int = 0, case: int = 0
 
 @app.post("/api/scan/{scan_id}/chat")
 async def api_chat(scan_id: int, request: Request):
-    """Kirim pesan ke Verification Assistant. Secret selalu di-mask sebelum keluar.
+    """Kirim pesan ke Verification Assistant. Nilai secret dikirim UTUH
+    (tanpa masking) untuk membantu validasi manual pentester.
 
     mode="validate" (fitur Validate with Agent di Live Verifier):
     kirim module + target verifier -> prompt validasi dibangun server-side
-    (temuan + evidence verifier, semua ter-mask), jawaban mengikuti playbook.
+    (temuan + evidence verifier), jawaban mengikuti playbook.
     """
     data = await request.json()
     mode = (data.get("mode") or "chat").strip().lower()
@@ -1380,7 +1381,7 @@ async def api_chat(scan_id: int, request: Request):
             cache_rows = await get_verification_cache(db, scan_id)
             verifier_rows = [dict(r) for r in cache_rows]
 
-        # Mode validate: bangun prompt validasi (server-side, secret ter-mask)
+        # Mode validate: bangun prompt validasi (server-side)
         if validation_ctx:
             module = validation_ctx["module"]
             target_raw = validation_ctx["target"]
@@ -1390,7 +1391,6 @@ async def api_chat(scan_id: int, request: Request):
                 module = module or str(secret_row.get("category") or "").lower()
             if not target_raw:
                 raise HTTPException(400, "target is required for mode=validate")
-            target_masked = mask_secret(target_raw)
             evidence = ""
             if verifier_rows:
                 # pass 1: module + target persis
@@ -1410,7 +1410,7 @@ async def api_chat(scan_id: int, request: Request):
             if not evidence and secret_row:
                 ev = re.sub(r"<[^>]+>", " ", str(secret_row.get("context") or ""))
                 evidence = re.sub(r"\s+", " ", ev).strip()[:600]
-            message = build_validation_message(secret_row, module, target_masked, evidence)
+            message = build_validation_message(secret_row, module, target_raw, evidence)
 
         history_rows = await get_chat_history(db, scan_id, secret_id)
         history = [{"role": r["role"], "content": r["content"]} for r in history_rows]
@@ -1477,7 +1477,7 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
             if not target:
                 agent_job_finish(job_id, error="target is required for mode=validate")
                 return
-            log("🔒 Target di-mask: %s" % mask_secret(target))
+            log("🎯 Target (nilai utuh): %s" % target)
             evidence = ""
             if verifier_rows:
                 for row in verifier_rows:
@@ -1494,10 +1494,8 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
             if not evidence and secret_row:
                 ev = re.sub(r"<[^>]+>", " ", str(secret_row.get("context") or ""))
                 evidence = re.sub(r"\s+", " ", ev).strip()[:600]
-            # log versi ter-mask (jangan bocorkan nilai mentah ke live log UI)
-            ev_log = evidence.replace(target, mask_secret(target)) if target else evidence
-            log("📄 Evidence verifier: %s" % (ev_log[:120] + "..." if len(ev_log) > 120 else (ev_log or "belum ada")))
-            message = build_validation_message(secret_row, module, mask_secret(target), evidence)
+            log("📄 Evidence verifier: %s" % (evidence[:120] + "..." if len(evidence) > 120 else (evidence or "belum ada")))
+            message = build_validation_message(secret_row, module, target, evidence)
         elif not message:
             agent_job_finish(job_id, error="message is required")
             return

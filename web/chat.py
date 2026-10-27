@@ -11,8 +11,8 @@ Fallback opsional (provider HTTP OpenAI-compatible) via env:
   MOBILE_AUDIT_LLM_PROVIDER = mistral | opencode | custom
   MOBILE_AUDIT_LLM_BASE_URL / MOBILE_AUDIT_LLM_API_KEY / MOBILE_AUDIT_LLM_MODEL
 
-PENTING PRIVASI: nilai secret TIDAK PERNAH dikirim penuh ke provider.
-Semua nilai secret di-mask via mask_secret() sebelum masuk prompt.
+PENTING: nilai secret diberikan UTUH (tanpa masking) ke provider — ini memang
+dibutuhkan pentester untuk validasi manual pada audit berizin.
 """
 import os
 import re
@@ -70,15 +70,7 @@ def load_skills() -> str:
     return text
 
 
-def _scrub_secret(text: str, secret: Optional[dict]) -> str:
-    """Ganti kemunculan nilai secret mentah dalam teks dengan versi ter-mask."""
-    m = str((secret or {}).get("match") or "")
-    if text and m and m in text:
-        return text.replace(m, mask_secret(m))
-    return text or ""
-
-
-def build_validation_message(secret, module: str, target_masked: str,
+def build_validation_message(secret, module: str, target: str,
                              evidence: str) -> str:
     """Bangun prompt VALIDASI temuan (fitur Validate with Agent di Live Verifier)."""
     lines = ["VALIDATION REQUEST - ikuti verification playbook."]
@@ -90,12 +82,11 @@ def build_validation_message(secret, module: str, target_masked: str,
                 secret.get("severity") or "-"))
         lines.append("- File: %s line %s" % (
             secret.get("file_path") or "-", secret.get("line_number") or "?"))
-        ctx = _scrub_secret((secret.get("context") or "").strip(), secret)
+        ctx = (secret.get("context") or "").strip()
         if ctx:
             lines.append("- Kode sekitar: " + ctx[:300])
     lines.append("- Live Verifier module: " + (module or "-"))
-    lines.append("- Target (ter-mask): " + (target_masked or "-"))
-    evidence = _scrub_secret(evidence, secret)
+    lines.append("- Target: " + (target or "-"))
     if evidence:
         lines.append("- Hasil verifier: " + evidence[:600])
     else:
@@ -127,16 +118,6 @@ MAX_HISTORY_TURNS = 10  # pasangan user+assistant terakhir yang dikirim sebagai 
 
 class ChatError(Exception):
     """Error yang aman ditampilkan ke user (tanpa api key/stacktrace)."""
-
-
-def mask_secret(value: str, keep_start: int = 6, keep_end: int = 4) -> str:
-    """Mask nilai secret: hanya prefix+suffix singkat yang terlihat."""
-    v = (value or "").strip()
-    if not v:
-        return ""
-    if len(v) <= keep_start + keep_end + 2:
-        return v[:2] + "****"
-    return v[:keep_start] + "********" + v[-keep_end:]
 
 
 # ---------------- Agent job (live activity log untuk UI) ----------------
@@ -265,7 +246,7 @@ SYSTEM_PROMPT = """Kamu adalah "Verification Assistant" di dalam Mobile Audit To
 Tugas kamu: membantu hunter menganalisis dan memverifikasi temuan hardcoded secret / endpoint yang ditemukan scanner.
 
 Aturan keras:
-1. Nilai secret SUDAH DIBERIKAN DALAM BENTUK TER-MASK (contoh: AIzaSy********1234). JANGAN PERNAH meminta user menempelkan nilai secret lengkap, password, atau key utuh ke chat.
+1. Nilai secret diberikan DALAM BENTUK UTUH (tanpa masking) supaya kamu bisa membantu validasi teknis pentester secara presisi. Ini audit berizin — perlakuan nilai sebagai data sensitif: jangan sarankan mem-publish nilai mentah ke laporan publik, gunakan format ter-mask saat menyusun REPORT DRAFT.
 2. Hasil Live Verifier deterministik (jika ada) adalah sumber KEBENARAN utama. Rujuk verdict itu; jika bertentangan dengan tebakanmu, utamakan hasil verifier dan jelaskan kemungkinan penyebabnya.
 3. Berikan analisis yang konkret dan actionable: tipe kredensial, attack path yang paling mungkin, langkah verifikasi PASIF/AMAN dulu (mis. cek scope, format, dokumentasi provider), lalu langkah aktif bila perlu, perkiraan severity (P1-P5 / CVSS kasar), dan dampak bisnisnya.
 4. Jika diminta, susun draft kalimat laporan siap submit bug bounty (judul, deskripsi, langkah reproduksi, impact) dalam bahasa Inggris atau Indonesia sesuai permintaan.
@@ -279,19 +260,16 @@ def _strip_html(text: str) -> str:
 
 
 def build_finding_context(secret: dict, verifier_rows: Optional[List[dict]] = None) -> str:
-    """Rangkum satu temuan secret untuk prompt. Semua nilai secret di-mask."""
-    match = str(secret.get("match") or "")
-    masked = mask_secret(match)
+    """Rangkum satu temuan secret untuk prompt. Nilai secret diberikan UTUH
+    (tanpa masking) untuk membantu validasi manual pentester dalam audit berizin."""
     context = str(secret.get("context") or "")
-    if match:
-        context = context.replace(match, masked)
     lines = [
         "### Konteks Temuan (dari scanner Mobile Audit Tool)",
         f"- Rule: {secret.get('rule_id') or '-'}",
         f"- Kategori: {secret.get('category') or '-'}",
         f"- Severity: {secret.get('severity') or '-'}",
         f"- File: {secret.get('file_path') or '-'} (line {secret.get('line_number') or '?'})",
-        f"- Nilai (TER-MASK): {masked or '-'}",
+        f"- Nilai: {str(secret.get('match') or '-')}",
     ]
     if context:
         snippet = context.strip().splitlines()
@@ -301,7 +279,7 @@ def build_finding_context(secret: dict, verifier_rows: Optional[List[dict]] = No
     if verifier_rows:
         lines.append("### Hasil Live Verifier (deterministik, jalur audit berizin)")
         for row in verifier_rows[:8]:
-            target = mask_secret(str(row.get("target") or ""))
+            target = str(row.get("target") or "")
             verdict = _strip_html(str(row.get("result_html") or "")).strip()
             if len(verdict) > 260:
                 verdict = verdict[:260] + "..."
@@ -494,7 +472,7 @@ def ask_assistant(secret: dict, verifier_rows: Optional[List[dict]],
     sys_content = SYSTEM_PROMPT if not skills else SYSTEM_PROMPT + "\n\n" + skills
     messages = [{"role": "system", "content": sys_content}]
     if log and secret:
-        log("🔎 Konteks temuan: %s @ %s:%s (nilai TER-MASK)"
+        log("🔎 Konteks temuan: %s @ %s:%s (nilai utuh, tanpa masking)"
             % (secret.get("rule_id") or "-", secret.get("file_path") or "?",
                secret.get("line_number") or "?"))
     if secret:

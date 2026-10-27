@@ -25,11 +25,10 @@ dbm.DB_PATH = str(db_copy)
 
 import chat
 
-# --- masking ---
-assert chat.mask_secret("AIzaSyABCDEF1234567890abcdefghij") == "AIzaSy********ghij"
-assert chat.mask_secret("short") == "sh****"
-assert chat.mask_secret("") == ""
-print("[2] mask_secret OK")
+# --- nilai secret utuh (masking dihapus by design: bantu validasi manual pentester) ---
+RAW_KEY = "AIzaSyABCDEF1234567890abcdefghij"
+assert not hasattr(chat, "mask_secret"), "mask_secret harus sudah dihapus"
+print("[2] masking dihapus OK")
 
 # --- skills: playbook + context terbaca untuk system prompt ---
 skills_txt = chat.load_skills()
@@ -37,22 +36,21 @@ assert "verification-playbook" in skills_txt.lower() or "VERDICT" in skills_txt
 assert len(skills_txt) <= chat.SKILLS_TOTAL_CAP + 200
 print(f"[2b] load_skills OK ({len(skills_txt)} chars)")
 
-# --- build_validation_message: tidak boleh bocorkan nilai secret mentah ---
+# --- build_validation_message: nilai secret UTUH masuk prompt (bantu validasi manual) ---
 _secret = {
     "rule_id": "google_api_key", "category": "Google", "severity": "HIGH",
     "file_path": "res/values/strings.xml", "line_number": 4086,
-    "match": "AIzaSyABCDEF1234567890abcdefghij",
-    "context": '<string name="google_api_key">AIzaSyABCDEF1234567890abcdefghij</string>',
+    "match": RAW_KEY,
+    "context": '<string name="google_api_key">' + RAW_KEY + '</string>',
 }
-_ev = "Google API key AIzaSyABCDEF1234567890abcdefghij RESTRICTED di 10 scopes"
-_msg = chat.build_validation_message(
-    _secret, "google-api", chat.mask_secret(_secret["match"]), _ev)
-assert "AIzaSyABCDEF1234567890abcdefghij" not in _msg, "LEAK raw secret di prompt validasi!"
-assert "AIzaSy********ghij" in _msg
+_ev = "Google API key " + RAW_KEY + " RESTRICTED di 10 scopes"
+_msg = chat.build_validation_message(_secret, "google-api", RAW_KEY, _ev)
+assert RAW_KEY in _msg, "nilai secret utuh harus masuk prompt validasi!"
+assert "- Target: " + RAW_KEY in _msg
 assert "VERDICT" in _msg
 _msg_nosecret = chat.build_validation_message(None, "firebase", "https://x.firebaseio.com", "")
 assert "firebase" in _msg_nosecret
-print("[2c] build_validation_message OK (secret ter-mask, tanpa secret juga aman)")
+print("[2c] build_validation_message OK (nilai utuh, tanpa secret juga aman)")
 
 # --- config: default = vibe CLI, model glm-5-3 ---
 for k in ("MOBILE_AUDIT_LLM_PROVIDER", "MOBILE_AUDIT_LLM_MODEL",
@@ -83,7 +81,7 @@ cfg = chat.get_llm_config()
 assert cfg["configured"] and cfg["provider"] == "opencode"
 print("[5] get_llm_config (fallback opencode) OK")
 
-# --- context builder: secret harus ter-mask ---
+# --- context builder: nilai secret UTUH (bantu validasi manual pentester) ---
 os.environ.pop("MOBILE_AUDIT_LLM_PROVIDER", None)
 secret = {
     "rule_id": "gcp_api_key", "category": "GCP", "severity": "high",
@@ -94,10 +92,10 @@ secret = {
 verifier = [{"module": "google", "target": "AIzaSyABCDEF1234567890abcdefghij",
              "result_html": "<b>VALID</b> key aktif"}]
 ctx = chat.build_finding_context(secret, verifier)
-assert "AIzaSyABCDEF1234567890abcdefghij" not in ctx, "SECRET MENTAH BOCOR DI CONTEXT!"
-assert "AIzaSy********ghij" in ctx
+assert "AIzaSyABCDEF1234567890abcdefghij" in ctx, "nilai secret utuh harus ada di context!"
+assert "- Nilai: AIzaSyABCDEF1234567890abcdefghij" in ctx
 assert "VALID key aktif" in ctx
-print("[6] build_finding_context OK (secret ter-mask)")
+print("[6] build_finding_context OK (nilai secret utuh)")
 
 # --- vibe completion: mock subprocess, validasi command + env + prompt ---
 for k in ("MOBILE_AUDIT_LLM_PROVIDER", "MOBILE_AUDIT_LLM_MODEL",
@@ -127,11 +125,10 @@ assert reply == "jawaban analisis dari vibe"
 cmd = captured["cmd"]
 assert cmd[0] == "vibe" and cmd[1] == "-p" and "--output" in cmd and "text" in cmd, cmd
 assert captured["env"].get("VIBE_ACTIVE_MODEL") == "glm-5-3", captured["env"]
-assert "AIzaSyABCDEF1234567890abcdefghij" not in cmd[2], "SECRET MENTAH DI PROMPT VIBE!"
-assert "AIzaSy********ghij" in cmd[2]
+assert "AIzaSyABCDEF1234567890abcdefghij" in cmd[2], "nilai secret utuh harus ikut ke prompt vibe"
 assert "JANGAN menjalankan tools" in cmd[2]
 assert "INSTRUKSI SISTEM" in cmd[2] and "PERTANYAAN HUNTER" in cmd[2]
-print("[7] vibe completion OK (command + VIBE_ACTIVE_MODEL + prompt ter-mask)")
+print("[7] vibe completion OK (command + VIBE_ACTIVE_MODEL + prompt utuh)")
 
 # --- vibe error path: exit code != 0 ---
 def fake_run_err(cmd, **kwargs):

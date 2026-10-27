@@ -355,10 +355,10 @@ pip install -r requirements.txt
 Halaman results punya tombol floating **🤖** di pojok kanan bawah yang membuka **split view panel** di sisi kanan (konsep Gemini side panel di Chrome) — konten utama otomatis menyusut & panel chat nempel full-height di kanan:
 - Klik **🤖 Tanya AI** pada baris temuan di tab Secrets & Keys → panel terbuka otomatis dengan konteks temuan itu ter-attach
 - **Enter** kirim pesan, **Shift+Enter** baris baru
-- AI menerima: rule, kategori, severity, file/line, nilai secret **ter-mask**, snippet kode, dan hasil Live Verifier deterministik
+- AI menerima: rule, kategori, severity, file/line, nilai secret **utuh (tanpa masking)**, snippet kode, dan hasil Live Verifier deterministik
 - Riwayat chat tersimpan per-temuan di SQLite (tabel `chat_history`)
 
-**PENTING — Privasi:** nilai secret TIDAK PERNAH dikirim penuh. `web/chat.py` selalu mem-mask nilai (prefix + suffix singkat) sebelum masuk prompt.
+**CATATAN — Nilai secret:** dikirim **utuh (tanpa masking)** ke model AI. Ini disengaja supaya pentester dibantu validasi secara presisi (decode JWT, cek format key, scope) pada audit berizin. Agent di-instruksikan untuk tetap mem-mask nilai saat menyusun REPORT DRAFT.
 
 ### Backend Default: Mistral Vibe CLI (lokal)
 

@@ -14,11 +14,11 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Secret scanning** berbasis regex dari `rules/secrets.json` (rule PEM mensyaratkan body base64 — header tanpa isi tidak dilaporkan).
 - **iOS**: deteksi binary terenkripsi FairPlay (`cryptid`) — hasil strings/symbol pada binary terenkripsi ditandai sebagai partial.
 - **Code Explorer**: browser corpus hasil decompile ala VS Code (syntax highlighting, grep ripgrep, find-in-file ala jadx-gui).
-- **Verification Assistant**: AI chatbox via vibe CLI lokal — secret selalu ter-mask sebelum dikirim ke model.
+- **Verification Assistant**: AI chatbox via vibe CLI lokal — nilai secret dikirim **utuh (tanpa masking)** untuk membantu validasi manual pentester pada audit berizin.
 - **Login auth**: seluruh halaman & API diproteksi session cookie.
 - **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
 - **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih satu temuan CRITICAL/HIGH atau **Validate Semua** (default) dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5. Tiap hasil jadi **thread chat interaktif** — pentester bisa debat / mengarahkan ulang hasil validasi agent langsung dari kartu temuan.
-- **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, mask secret, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
+- **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, temuan + target, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
 - **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
@@ -57,7 +57,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 **Verification Assistant (AI):**
 - Default: vibe CLI lokal, model via `VIBE_ACTIVE_MODEL` (alias model di config vibe, mis. `glm-5-3`).
 - Fallback provider HTTP (opsional): `MOBILE_AUDIT_LLM_PROVIDER` = `mistral` | `opencode` | `custom`, plus `MOBILE_AUDIT_LLM_BASE_URL` / `MOBILE_AUDIT_LLM_API_KEY` / `MOBILE_AUDIT_LLM_MODEL`. Detail: [web/README.md](web/README.md).
-- **Validate with Agent**: dari Live Verifier, klik 🤖 → panel AI terbuka dan prompt validasi dibangun server-side (module + target ter-mask + evidence verifier + snippet kode ter-mask); jawaban mengikuti format playbook (VERDICT/EVIDENCE/LATERAL MOVEMENT/SEVERITY/NEXT SAFE STEPS).
+- **Validate with Agent**: dari Live Verifier, klik 🤖 → panel AI terbuka dan prompt validasi dibangun server-side (module + target utuh + evidence verifier + snippet kode); jawaban mengikuti format playbook (VERDICT/EVIDENCE/LATERAL MOVEMENT/SEVERITY/NEXT SAFE STEPS).
 - Skill markdown di `skills/*.md` otomatis dibaca (cache mtime, cap karakter) dan digabung ke system prompt.
 
 ## Instalasi lokal (Windows / Linux)

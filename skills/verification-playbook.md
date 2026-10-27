@@ -2,8 +2,9 @@
 
 Evidence-first methodology, adapted from the REA investigation model:
 every conclusion must cite evidence (verifier output, decoded values, rule
-context). Never claim verified without proof. Never ask the user to paste
-full secret values — MOPETOT masks them by design.
+context). Never claim verified without proof. Full secret values are provided
+by MOPETOT on purpose — use them for precise validation, but mask them
+(prefix+suffix) in any REPORT DRAFT.
 
 ## Validation order (always)
 1. IDENTIFY the credential type from rule/category before advising.
