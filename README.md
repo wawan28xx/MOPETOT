@@ -21,7 +21,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, temuan + target, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
 - **RASP Bypass Generator (Frida)**: seksi terpisah — script **RASP-aware**, dirakit dari hasil deteksi scanner (`meta["rasp"]` di findings.json): blok anti-Frida-detection native (libc `strstr`/`fgets`/`connect`/`access`), kill-switch guard (System.exit/killProcess diblokir) untuk protektor komersial (AppSealing/Promon/DexGuard/AppGuard/V-Guard/free_rasp/...), hook spesifik RootBeer, anti-debug (ptrace), anti-VM, bypass standar (SSL pinning Conscrypt+OkHttp4, root path luas, biometric semua overload), crypto dumper (key+IV+cipher) untuk temuan crypto/kredensial, dan blok catatan Flutter (`libflutter.so` + reFlutter).
-- **One-Click PoC & Exploit Generator**: ADB intent extras, deep link trigger, HTML exploit builder — terpisah dari RASP bypass.
+- **One-Click PoC & Exploit Generator**: ADB intent extras, deep link trigger, HTML exploit builder — terpisah dari RASP bypass. **Tier 1**: PoC siap jalan per temuan Secrets & Keys (deterministic template, bukan AI): Google API key scope probe, Firebase open-rules check, AWS STS, Stripe, Slack/Discord webhook, GitHub/SendGrid/Twilio token, JWT decode, private key openssl, crypto material entropy+decrypt, dan scaffold generic credential — masing-masing berlabel **PASIF** (read-only) / **AKTIF** (perlu izin) / **TEMPLATE** (endpoint diisi dari corpus).
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
 - Dashboard dengan riwayat scan, filter, pagination, perbandingan dua scan, log realtime.
 - Cache SQLite untuk hasil verifier dan PoC.
@@ -256,6 +256,7 @@ cd web
 python test_auth.py             # login & session
 python test_chat_assistant.py   # Verification Assistant (mock)
 python test_frida_generator.py  # RASP-aware Frida bypass generator + sweep semua scan
+python test_poc_secrets.py      # Secret PoC generator (Tier 1)
 python test_code_explorer.py    # Code Explorer backend
 python test_node_syntax.py      # syntax JS template results.html
 node test_hljs_pipeline.js      # pipeline syntax highlighting

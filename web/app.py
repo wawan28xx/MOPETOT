@@ -9,6 +9,7 @@ import re
 import shutil
 import threading
 import time
+from typing import List, Dict, Any
 import markdown as md_lib
 from datetime import datetime
 from pathlib import Path
@@ -948,7 +949,11 @@ def extract_report_metadata(report_file: Path) -> dict:
     return meta
 
 
-def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path) -> dict:
+POC_PAYLOAD_VERSION = 2  # v2: + secret_pocs (PoC siap jalan per temuan Secrets & Keys)
+
+
+def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path,
+                       secrets: List[Dict[str, Any]] = None) -> dict:
     """CPU and filesystem-heavy PoC extraction moved off event-loop thread."""
     poc_engine = PoCEngine(corpus_dir=corpus_dir if corpus_dir and corpus_dir.exists() else None)
     pkg_name = (manifest_obj or {}).get("package_name") or scan_obj.get("package_name") or "com.target.app"
@@ -973,14 +978,28 @@ def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path) -> 
 
     deeplink_pocs = []
     for dl in deeplinks_raw:
-        dl_str = dl if isinstance(dl, str) else ("://".join(dl) if isinstance(dl, list) else str(dl))
+        if isinstance(dl, str):
+            dl_str = dl
+        elif isinstance(dl, list):
+            # scheme/host list bisa berisi None — saring sebelum join
+            parts = [str(x) for x in dl if x]
+            dl_str = "://".join(parts) if parts else ""
+        else:
+            dl_str = str(dl) if dl else ""
+        if not dl_str:
+            continue
         deeplink_pocs.append(poc_engine.generate_deeplink_poc(pkg_name, dl_str))
+
+    # Tier 1: PoC siap jalan per temuan Secrets & Keys (deterministic template)
+    secret_pocs = poc_engine.generate_secret_pocs(secrets or [])
 
     return {
         "package_name": pkg_name,
         "component_pocs": component_pocs,
         "deeplink_pocs": deeplink_pocs,
-        "total_pocs": len(component_pocs) + len(deeplink_pocs),
+        "secret_pocs": secret_pocs,
+        "poc_version": POC_PAYLOAD_VERSION,
+        "total_pocs": len(component_pocs) + len(deeplink_pocs) + len(secret_pocs),
     }
 
 
@@ -1609,9 +1628,11 @@ async def api_get_pocs(scan_id: int, force: int = 0, lazy: int = 0):
             if cached and cached["payload_json"]:
                 try:
                     payload = json.loads(cached["payload_json"])
-                    payload["from_cache"] = True
-                    payload["cached_at"] = cached["updated_at"]
-                    return JSONResponse(payload)
+                    # cache versi lama (tanpa secret_pocs) -> regenerate
+                    if payload.get("poc_version") == POC_PAYLOAD_VERSION:
+                        payload["from_cache"] = True
+                        payload["cached_at"] = cached["updated_at"]
+                        return JSONResponse(payload)
                 except Exception:
                     pass
 
@@ -1626,12 +1647,13 @@ async def api_get_pocs(scan_id: int, force: int = 0, lazy: int = 0):
             })
 
         manifest = await get_manifest(db, scan_id)
+        secrets = [dict(s) for s in await get_secrets(db, scan_id)]
 
         result_dir = RESULTS_DIR / str(scan_id)
         corpus_dir = result_dir / "work" / "corpus"
         scan_obj = dict(scan)
         manifest_obj = dict(manifest) if manifest else {}
-        payload = await asyncio.to_thread(build_pocs_payload, scan_obj, manifest_obj, corpus_dir)
+        payload = await asyncio.to_thread(build_pocs_payload, scan_obj, manifest_obj, corpus_dir, secrets)
         await upsert_poc_cache(db, scan_id, json.dumps(payload))
         payload["from_cache"] = False
         return JSONResponse(payload)

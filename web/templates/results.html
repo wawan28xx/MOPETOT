@@ -537,12 +537,33 @@ function renderPocArea() {
 function buildPocCardsHtml(pocData) {
     const compPocs = pocData.component_pocs || [];
     const dlPocs = pocData.deeplink_pocs || [];
+    const secPocs = pocData.secret_pocs || [];
 
-    if (compPocs.length === 0 && dlPocs.length === 0) {
-        return '<p class="empty" style="padding:12px;">Tidak ada custom scheme / komponen exported yang dapat di-generate PoC otomatis pada aplikasi ini.</p>';
+    if (compPocs.length === 0 && dlPocs.length === 0 && secPocs.length === 0) {
+        return '<p class="empty" style="padding:12px;">Tidak ada custom scheme / komponen exported / temuan Secrets &amp; Keys yang dapat di-generate PoC otomatis pada aplikasi ini.</p>';
     }
 
     let html = '';
+
+    // ===== PoC per temuan Secrets & Keys (Tier 1) =====
+    secPocs.forEach(function(p) {
+        const modeBadge = p.mode === 'AKTIF'
+            ? '<span class="res-badge res-dead" style="font-size:10px; margin-left:6px;">⚠ AKTIF</span>'
+            : (p.mode === 'TEMPLATE'
+                ? '<span class="res-badge" style="font-size:10px; margin-left:6px; background:rgba(252,238,10,0.12); color:#fcee0a;">TEMPLATE</span>'
+                : '<span class="res-badge res-secure" style="font-size:10px; margin-left:6px;">PASIF</span>');
+        const langIcon = p.language === 'python' ? '🐍' : '⌨️';
+        html += '<div class="poc-card">';
+        html += '<div class="poc-card-header">';
+        html += '<span class="poc-card-title">🔑 ' + escHtml(p.title || 'Secret PoC') + modeBadge + '</span>';
+        html += '<div style="display:flex; gap:6px; flex-wrap:wrap;">';
+        html += '<button class="btn-adb-copy" onclick="copyToClipboard(\'' + escHtml(p.code || '').replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\', this)">' + langIcon + ' Copy ' + escHtml((p.language || 'script').toUpperCase()) + '</button>';
+        html += '</div></div>';
+        html += '<div class="poc-card-desc">' + escHtml(p.rule_id || '?') + ' (severity: ' + escHtml(String(p.severity || '?').toUpperCase()) + ') @ <code>' + escHtml(String(p.file_path || '').split(/[\\/\\\\]/).pop() + ':' + (p.line_number || '?')) + '</code></div>';
+        html += '<div class="poc-card-desc" style="color:var(--text-secondary);">' + escHtml(p.description || '') + '</div>';
+        html += '<pre class="poc-code-block">' + escHtml(p.code || '') + '</pre>';
+        html += '</div>';
+    });
     dlPocs.forEach(function(p, idx) {
         html += '<div class="poc-card">';
         html += '<div class="poc-card-header">';
@@ -1515,7 +1536,7 @@ function loadLiveVerifier() {
     html += '<span style="color:var(--accent); font-weight:800; font-size:16px;">⚡ One-Click PoC &amp; Exploit Generator</span>';
     html += '</div>';
     html += '<div class="section-content" id="poc-generator-container">';
-    html += '<p class="subtitle" style="margin-bottom:16px;">Script pembuktian konsep (Proof-of-Concept) siap pakai yang di-generate langsung dari temuan Manifest, DeepLink, dan IPC:</p>';
+    html += '<p class="subtitle" style="margin-bottom:16px;">PoC siap pakai dari temuan <b style="color:#00f0ff;">Secrets &amp; Keys</b> (skrip validasi per kredensial — PASIF/AKTIF) plus <b style="color:#00f0ff;">Manifest, DeepLink, dan IPC</b>:</p>';
     html += '<div id="poc-cards-dynamic"></div>';
     html += '</div></div>';
 
