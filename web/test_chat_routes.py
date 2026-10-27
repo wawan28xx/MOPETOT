@@ -10,6 +10,8 @@ routes = sorted(r.path for r in app.app.routes if "chat" in getattr(r, "path", "
 # /chat/history punya 2 entri (GET + DELETE)
 assert routes == [
     "/api/scan/{scan_id}/chat",
+    "/api/scan/{scan_id}/chat/agent",
+    "/api/scan/{scan_id}/chat/agent/{job_id}",
     "/api/scan/{scan_id}/chat/config",
     "/api/scan/{scan_id}/chat/history",
     "/api/scan/{scan_id}/chat/history",

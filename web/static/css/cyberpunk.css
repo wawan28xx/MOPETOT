@@ -884,6 +884,27 @@ footer.footer { position: relative; z-index: 1; }
     word-break: break-word;
 }
 .vf-msg-bot.vf-thinking { color: var(--text-muted); font-style: italic; border-style: dashed; }
+.vf-logs {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-style: normal;
+    color: var(--text-secondary);
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 8px;
+    background: var(--bg-primary);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+.vf-logs .vf-log-line { white-space: pre-wrap; word-break: break-word; animation: vf-line-in 0.25s ease; }
+.vf-logs .vf-log-line:first-child { color: var(--text-muted); }
+@keyframes vf-line-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 .vf-input-row {
     display: flex;
     gap: 8px;

@@ -2723,27 +2723,64 @@ function vfSetBadges(sid, reply) {
     if (holder) holder.innerHTML = vfVerdictBadge(reply) + vfSeverityBadge(reply);
 }
 
+/* Live activity: jalankan job agent + poll log baris demi baris */
+async function vfRunAgentJob(sid, body, kindLabel) {
+    var msgs = document.getElementById('vf-msgs-' + sid);
+    if (!msgs) return {ok: false, err: 'thread tidak ditemukan.'};
+    var wrap = document.createElement('div');
+    wrap.className = 'vf-msg-bot vf-thinking';
+    var logsId = 'vf-live-' + sid + '-' + Math.floor(Math.random() * 1000000);
+    wrap.innerHTML = '<div style="font-weight:700; margin-bottom:6px;">⏳ ' + vfFmt(kindLabel) + '</div>'
+        + '<div class="vf-logs" id="' + logsId + '"><div class="vf-log-line">[boot] menghubungi server job agent...</div></div>';
+    msgs.appendChild(wrap);
+    var logBox = document.getElementById(logsId);
+    var seen = 0;
+    var polls = 0;
+    try {
+        var r = await fetch('/api/scan/' + SCAN_ID + '/chat/agent', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        var j = await r.json().catch(function() { return {}; });
+        if (!r.ok || !j.job_id) {
+            wrap.remove();
+            return {ok: false, err: (j.detail || j.error) || 'Gagal memulai job agent.'};
+        }
+        while (true) {
+            await new Promise(function(res) { setTimeout(res, 1200); });
+            var s = await fetch('/api/scan/' + SCAN_ID + '/chat/agent/' + j.job_id);
+            if (s.status === 404) { wrap.remove(); return {ok: false, err: 'Job agent hilang dari server.'}; }
+            var st = await s.json().catch(function() { return {status: 'running', logs: []}; });
+            for (var i = seen; i < (st.logs || []).length; i++) {
+                var ln = document.createElement('div');
+                ln.className = 'vf-log-line';
+                ln.textContent = st.logs[i];
+                logBox.appendChild(ln);
+            }
+            seen = (st.logs || []).length;
+            logBox.scrollTop = logBox.scrollHeight;
+            if (st.status === 'done') { wrap.remove(); return {ok: true, reply: st.reply || ''}; }
+            if (st.status === 'error') { wrap.remove(); return {ok: false, err: st.error || 'Agent error.'}; }
+            polls++;
+            if (polls > 1000) { wrap.remove(); return {ok: false, err: 'Timeout menunggu agent (20 menit).'}; }
+        }
+    } catch (e) {
+        wrap.remove();
+        return {ok: false, err: 'Gagal terhubung ke server.'};
+    }
+}
+
 async function vfRunOne(sec) {
     var sid = sec.id;
     vfCreateThread(sec);
-    var think = vfAppendMsg(sid, 'bot', '⏳ Agent memvalidasi temuan (playbook + evidence)... bisa 10-60 detik.', true);
-    try {
-        var r = await fetch('/api/scan/' + SCAN_ID + '/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mode: 'validate', secret_id: sid})
-        });
-        var j = await r.json().catch(function() { return {}; });
-        if (think) think.remove();
-        if (r.ok && j.reply) {
-            vfSetBadges(sid, j.reply);
-            vfAppendMsg(sid, 'bot', j.reply);
-        } else {
-            vfAppendMsg(sid, 'bot', '❌ ' + ((j.detail || j.error) || 'Gagal validasi.'));
-        }
-    } catch (e) {
-        if (think) think.remove();
-        vfAppendMsg(sid, 'bot', '❌ Gagal terhubung ke server.');
+    var out = await vfRunAgentJob(sid, {mode: 'validate', secret_id: sid},
+        'Agent memvalidasi temuan — live activity di balik layar:');
+    if (out.ok) {
+        vfSetBadges(sid, out.reply);
+        vfAppendMsg(sid, 'bot', out.reply);
+    } else {
+        vfAppendMsg(sid, 'bot', '❌ ' + out.err);
     }
 }
 
@@ -2756,24 +2793,13 @@ async function vfFollowUp(sid) {
     input.disabled = true;
     if (send) send.disabled = true;
     vfAppendMsg(sid, 'user', msg);
-    var think = vfAppendMsg(sid, 'bot', '⏳ Agent mikir...', true);
-    try {
-        var r = await fetch('/api/scan/' + SCAN_ID + '/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mode: 'chat', secret_id: sid, message: msg})
-        });
-        var j = await r.json().catch(function() { return {}; });
-        if (think) think.remove();
-        if (r.ok && j.reply) {
-            vfSetBadges(sid, j.reply);
-            vfAppendMsg(sid, 'bot', j.reply);
-        } else {
-            vfAppendMsg(sid, 'bot', '❌ ' + ((j.detail || j.error) || 'Gagal.'));
-        }
-    } catch (e) {
-        if (think) think.remove();
-        vfAppendMsg(sid, 'bot', '❌ Gagal terhubung ke server.');
+    var out = await vfRunAgentJob(sid, {mode: 'chat', secret_id: sid, message: msg},
+        'Agent mikir — live activity di balik layar:');
+    if (out.ok) {
+        vfSetBadges(sid, out.reply);
+        vfAppendMsg(sid, 'bot', out.reply);
+    } else {
+        vfAppendMsg(sid, 'bot', '❌ ' + out.err);
     }
     input.disabled = false;
     if (send) send.disabled = false;

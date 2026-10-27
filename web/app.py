@@ -7,6 +7,7 @@ import contextlib
 import logging
 import re
 import shutil
+import threading
 import time
 import markdown as md_lib
 from datetime import datetime
@@ -34,7 +35,7 @@ from verification import (
 )
 
 from poc_engine import PoCEngine
-from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, mask_secret
+from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, mask_secret, agent_job_new, agent_job_get, agent_job_finish, make_logger
 import code_explorer as ce
 
 logger = logging.getLogger(__name__)
@@ -1432,6 +1433,139 @@ async def api_chat(scan_id: int, request: Request):
             await db.close()
         except Exception:
             pass
+
+
+# ---------------- Agent job (live activity log, dipoll oleh UI) ----------------
+
+async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
+    """Pipeline agent versi job: sama dengan /chat tapi tiap tahap di-log live."""
+    log = make_logger(job_id)
+    mode = (payload.get("mode") or "chat").strip().lower()
+    secret_id = payload.get("secret_id") or None
+    module = (payload.get("module") or "").strip()
+    target = (payload.get("target") or "").strip()
+    message = (payload.get("message") or "").strip()
+
+    log("🤖 Mulai job agent (mode=%s, scan=%s)" % (mode, scan_id))
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            agent_job_finish(job_id, error="Scan not found")
+            return
+        log("📦 Scan #%s: %s" % (scan_id, getattr(scan, "package_name", None) or getattr(scan, "app_name", None) or "-"))
+
+        secret_row = None
+        if secret_id:
+            secrets = await get_secrets(db, scan_id)
+            secret_row = next((dict(s) for s in secrets if s["id"] == secret_id), None)
+            if secret_row:
+                log("🔎 Temuan dimuat: %s | %s | severity awal %s"
+                    % (secret_row.get("rule_id") or "-", secret_row.get("file_path") or "?",
+                       secret_row.get("severity") or "-"))
+
+        verifier_rows = None
+        if secret_row:
+            cache_rows = await get_verification_cache(db, scan_id)
+            verifier_rows = [dict(r) for r in cache_rows]
+            log("🧪 Cache Live Verifier dimuat: %d row" % len(verifier_rows))
+
+        if mode == "validate":
+            if not target and secret_row:
+                target = str(secret_row.get("match") or "")
+                module = module or str(secret_row.get("category") or "").lower()
+            if not target:
+                agent_job_finish(job_id, error="target is required for mode=validate")
+                return
+            log("🔒 Target di-mask: %s" % mask_secret(target))
+            evidence = ""
+            if verifier_rows:
+                for row in verifier_rows:
+                    if row.get("module") == module and (row.get("target") or "") == target:
+                        ev = re.sub(r"<[^>]+>", " ", row.get("result_html") or "")
+                        evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+                        break
+                if not evidence:
+                    for row in verifier_rows:
+                        if (row.get("target") or "") == target:
+                            ev = re.sub(r"<[^>]+>", " ", row.get("result_html") or "")
+                            evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+                            break
+            if not evidence and secret_row:
+                ev = re.sub(r"<[^>]+>", " ", str(secret_row.get("context") or ""))
+                evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+            # log versi ter-mask (jangan bocorkan nilai mentah ke live log UI)
+            ev_log = evidence.replace(target, mask_secret(target)) if target else evidence
+            log("📄 Evidence verifier: %s" % (ev_log[:120] + "..." if len(ev_log) > 120 else (ev_log or "belum ada")))
+            message = build_validation_message(secret_row, module, mask_secret(target), evidence)
+        elif not message:
+            agent_job_finish(job_id, error="message is required")
+            return
+
+        cfg = get_llm_config()
+        if not cfg["configured"]:
+            agent_job_finish(job_id, error="LLM provider belum dikonfigurasi: " + ", ".join(cfg["missing_env"]))
+            return
+        log("⚙️ Backend AI: %s" % cfg["provider"])
+
+        history_rows = await get_chat_history(db, scan_id, secret_id)
+        history = [{"role": r["role"], "content": r["content"]} for r in history_rows]
+        await insert_chat_message(db, scan_id, secret_id, "user", message)
+        db.close()
+
+        try:
+            reply = await asyncio.to_thread(
+                ask_assistant, secret_row, verifier_rows, history, message, cfg, log
+            )
+        except ChatError as e:
+            agent_job_finish(job_id, error=str(e))
+            return
+
+        db = await get_db()
+        await insert_chat_message(db, scan_id, secret_id, "assistant", reply)
+        agent_job_finish(job_id, reply=reply)
+    except Exception as e:  # jangan biarkan thread mati diam-diam
+        agent_job_finish(job_id, error="internal error: %s" % e)
+    finally:
+        try:
+            await db.close()
+        except Exception:
+            pass
+
+
+def _agent_job_thread(job_id: str, scan_id: int, payload: dict) -> None:
+    try:
+        asyncio.run(_run_agent_job(job_id, scan_id, payload))
+    except Exception as e:
+        agent_job_finish(job_id, error="internal error: %s" % e)
+
+
+@app.post("/api/scan/{scan_id}/chat/agent")
+async def api_chat_agent_start(scan_id: int, request: Request):
+    """Mulai job agent (validate/chat) -> {job_id}. UI poll status untuk live log."""
+    payload = await request.json()
+    mode = (payload.get("mode") or "chat").strip().lower()
+    if mode not in ("validate", "chat"):
+        raise HTTPException(400, "mode must be validate or chat")
+    if mode == "validate" and not (payload.get("target") or payload.get("secret_id")):
+        raise HTTPException(400, "target or secret_id is required for mode=validate")
+    if mode == "chat" and not (payload.get("message") or "").strip():
+        raise HTTPException(400, "message is required")
+
+    job_id = agent_job_new()
+    threading.Thread(
+        target=_agent_job_thread, args=(job_id, scan_id, payload), daemon=True
+    ).start()
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/scan/{scan_id}/chat/agent/{job_id}")
+async def api_chat_agent_status(scan_id: int, job_id: str):
+    """Status job agent: {status: running|done|error, logs: [...], reply, error}."""
+    job = agent_job_get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    return JSONResponse(job)
 
 
 @app.get("/api/scan/{scan_id}/pocs")

@@ -18,6 +18,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Login auth**: seluruh halaman & API diproteksi session cookie.
 - **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
 - **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih satu temuan CRITICAL/HIGH atau **Validate Semua** (default) dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5. Tiap hasil jadi **thread chat interaktif** — pentester bisa debat / mengarahkan ulang hasil validasi agent langsung dari kartu temuan.
+- **Live activity agent**: saat agent bekerja, pentester melihat apa yang terjadi di balik layar secara real-time — muat skill, mask secret, evidence verifier, ukuran prompt, command `vibe` yang dieksekusi (model, max-turns), plus **stdout/stderr vibe di-stream per baris** ke bubble log live (`POST /api/scan/{id}/chat/agent` + poll `GET .../agent/{job_id}`).
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
 - **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
