@@ -1491,7 +1491,7 @@ function loadLiveVerifier() {
             window._verifyRowLookup[buildVerifyLookupKey('firebase', fbUrl)] = rowId;
             html += '<tr>';
             html += '<td style="font-family:var(--font-mono); font-weight:600; color:var(--info);">' + escHtml(fbUrl) + '</td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyFirebase(' + idx + ')">▶ Test CRUD</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyFirebase(' + idx + ')">▶ Test CRUD</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;firebase&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1511,7 +1511,7 @@ function loadLiveVerifier() {
             window._verifyRowLookup[buildVerifyLookupKey('google-api', keyStr)] = rowId;
             html += '<tr>';
             html += '<td><span class="hardcoded-highlight">' + escHtml(keyStr) + '</span></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyGoogleKey(' + idx + ')">🔑 Check 10 Scopes</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyGoogleKey(' + idx + ')">🔑 Check 10 Scopes</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;google&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1532,7 +1532,7 @@ function loadLiveVerifier() {
             html += '<tr>';
             html += '<td><span class="hardcoded-highlight">' + escHtml(item.access_key) + '</span></td>';
             html += '<td><input type="text" id="aws_sk_input_' + idx + '" placeholder="Masukkan Secret Key jika ada..." class="filter-search" style="font-size:11px; padding:6px 10px; width:100%;"></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyAws(' + idx + ')">☁️ GetCallerIdentity</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyAws(' + idx + ')">☁️ GetCallerIdentity</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;aws&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1554,7 +1554,7 @@ function loadLiveVerifier() {
             html += '<tr>';
             html += '<td><span class="hardcoded-highlight">' + escHtml(sKey) + '</span></td>';
             html += '<td><span class="res-badge ' + (isSk ? 'res-open-rw' : 'res-priv') + '">' + (isSk ? 'Secret Key (sk_)' : 'Publishable Key (pk_)') + '</span></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyStripe(' + idx + ')">💳 Cek Stripe API</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyStripe(' + idx + ')">💳 Cek Stripe API</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;stripe&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1576,7 +1576,7 @@ function loadLiveVerifier() {
             html += '<tr>';
             html += '<td style="font-family:var(--font-mono); font-size:12px;">' + escHtml(wUrl) + '</td>';
             html += '<td><span class="res-badge ' + (isSlack ? 'res-alive' : 'res-priv') + '">' + (isSlack ? 'Slack' : 'Discord') + '</span></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyWebhook(' + idx + ')">💬 Probe Webhook</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyWebhook(' + idx + ')">💬 Probe Webhook</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;webhook&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1599,7 +1599,7 @@ function loadLiveVerifier() {
             html += '<tr>';
             html += '<td><span class="res-badge res-open-ro" style="font-size:10px;">DEV / STAGING</span><br><small style="font-family:var(--font-mono);">' + escHtml(h) + '</small></td>';
             html += '<td class="endpoint-url-cell"><a class="endpoint-link" href="' + escHtml(u) + '" target="_blank" rel="noopener noreferrer">' + escHtml(u) + '</a></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyEndpoint(' + idx + ')">⚡ Probe URL</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyEndpoint(' + idx + ')">⚡ Probe URL</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;endpoint&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -1619,7 +1619,7 @@ function loadLiveVerifier() {
             window._verifyRowLookup[buildVerifyLookupKey('ip', ipStr)] = rowId;
             html += '<tr>';
             html += '<td style="font-family:var(--font-mono); font-weight:600;">' + escHtml(ipStr) + '</td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyIP(' + idx + ')">⚡ Probe IP</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyIP(' + idx + ')">⚡ Probe IP</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;ip&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -2564,6 +2564,72 @@ document.addEventListener('keydown', function(e) {
         ceFindNav(e.shiftKey ? -1 : 1);
     }
 });
+
+
+/* ---------- VALIDATE WITH AGENT (Live Verifier x Verification Assistant) ---------- */
+function triggerValidateAgent(module, idx) {
+    var C = window._liveVerifierCandidates || {};
+    var target = null;
+    if (module === 'firebase') target = C.firebase ? C.firebase[idx] : null;
+    else if (module === 'google') target = C.googleKeys ? C.googleKeys[idx] : null;
+    else if (module === 'aws') target = (C.awsKeys && C.awsKeys[idx]) ? C.awsKeys[idx].access_key : null;
+    else if (module === 'stripe') target = C.stripeKeys ? C.stripeKeys[idx] : null;
+    else if (module === 'webhook') target = C.webhooks ? C.webhooks[idx] : null;
+    else if (module === 'endpoint') target = (C.endpoints && C.endpoints[idx]) ? C.endpoints[idx].url : null;
+    else if (module === 'ip') target = C.ips ? C.ips[idx] : null;
+    if (!target) return;
+
+    // buka panel AI + pilih temuan terkait dari Secrets & Keys
+    var sid = null;
+    for (var i = 0; i < globalSecrets.length; i++) {
+        var m = globalSecrets[i].match || '';
+        if (m && (m.indexOf(target) >= 0 || target.indexOf(m) >= 0)) { sid = globalSecrets[i].id; break; }
+    }
+    if (!document.body.classList.contains('chat-open')) toggleAssistant();
+    if (sid) {
+        var sel = document.getElementById('chat-secret-select');
+        if (sel) sel.value = String(sid);
+        assistantSecretId = sid;
+    }
+    assistantMessages = [];
+    renderAssistantMessages();
+    // preview permintaan + thinking bubble
+    assistantMessages.push({role: 'user', content: '🤖 [Validate with Agent] ' + module + ' → ' + String(target).substring(0, 40)});
+    renderAssistantMessages();
+    var box = document.getElementById('chat-messages');
+    var thinking = document.createElement('div');
+    thinking.className = CHAT_BUBBLE_BOT;
+    thinking.id = 'chat-thinking';
+    thinking.innerHTML = '<div class="' + CHAT_MSG_ROLE + '">🤖 Assistant</div><div class="italic text-[var(--text-muted)]"><span class="inline-block animate-pulse">⏳ Memvalidasi temuan (playbook + evidence verifier)...</span></div>';
+    if (box) { box.appendChild(thinking); box.scrollTop = box.scrollHeight; }
+
+    // samakan nama module dengan verification_cache (google -> google-api)
+    var cacheModule = (module === 'google') ? 'google-api' : module;
+    var body = {mode: 'validate', module: cacheModule, target: target};
+    if (sid) body.secret_id = sid;
+    fetch('/api/scan/' + SCAN_ID + '/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+    .then(function(res) {
+        var t = document.getElementById('chat-thinking');
+        if (t) t.remove();
+        if (res.ok && res.j.reply) {
+            loadAssistantHistory();
+        } else {
+            assistantMessages.push({role: 'assistant', content: '❌ ' + ((res.j && (res.j.detail || res.j.error)) || 'Gagal validasi.')});
+            renderAssistantMessages();
+        }
+    })
+    .catch(function() {
+        var t = document.getElementById('chat-thinking');
+        if (t) t.remove();
+        assistantMessages.push({role: 'assistant', content: '❌ Gagal terhubung ke server.'});
+        renderAssistantMessages();
+    });
+}
 
 function openFridaModalDirect() {
     fetch('/api/scan/' + SCAN_ID + '/frida-script')

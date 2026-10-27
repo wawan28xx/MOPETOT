@@ -16,7 +16,8 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Code Explorer**: browser corpus hasil decompile ala VS Code (syntax highlighting, grep ripgrep, find-in-file ala jadx-gui).
 - **Verification Assistant**: AI chatbox via vibe CLI lokal — secret selalu ter-mask sebelum dikirim ke model.
 - **Login auth**: seluruh halaman & API diproteksi session cookie.
-- **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook.
+- **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
+- **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
 - **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**
 - Dashboard dengan riwayat scan, filter, pagination, perbandingan dua scan, log realtime.
@@ -54,6 +55,8 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 **Verification Assistant (AI):**
 - Default: vibe CLI lokal, model via `VIBE_ACTIVE_MODEL` (alias model di config vibe, mis. `glm-5-3`).
 - Fallback provider HTTP (opsional): `MOBILE_AUDIT_LLM_PROVIDER` = `mistral` | `opencode` | `custom`, plus `MOBILE_AUDIT_LLM_BASE_URL` / `MOBILE_AUDIT_LLM_API_KEY` / `MOBILE_AUDIT_LLM_MODEL`. Detail: [web/README.md](web/README.md).
+- **Validate with Agent**: dari Live Verifier, klik 🤖 → panel AI terbuka dan prompt validasi dibangun server-side (module + target ter-mask + evidence verifier + snippet kode ter-mask); jawaban mengikuti format playbook (VERDICT/EVIDENCE/LATERAL MOVEMENT/SEVERITY/NEXT SAFE STEPS).
+- Skill markdown di `skills/*.md` otomatis dibaca (cache mtime, cap karakter) dan digabung ke system prompt.
 
 ## Instalasi lokal (Windows / Linux)
 
@@ -214,6 +217,7 @@ docker run --rm -v mopetot-data:/data --workdir /app/web mopetot:local \
 ├── secret_scanner.py        # Scanner rules-based
 ├── engines/                 # Engine unpacking dan analisis per format
 ├── rules/secrets.json       # Rule secret scanning
+├── skills/                  # Skill AI (verification playbook + konteks MOPETOT)
 ├── web/app.py               # FastAPI web UI/API
 ├── web/auth.py              # Login & session auth
 ├── web/chat.py              # Verification Assistant (AI, vibe CLI)

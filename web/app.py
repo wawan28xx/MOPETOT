@@ -34,7 +34,7 @@ from verification import (
 )
 
 from poc_engine import PoCEngine
-from chat import get_llm_config, ask_assistant, ChatError
+from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, mask_secret
 import code_explorer as ce
 
 logger = logging.getLogger(__name__)
@@ -1335,12 +1335,26 @@ async def api_ce_search(scan_id: int, q: str = "", regex: int = 0, case: int = 0
 
 @app.post("/api/scan/{scan_id}/chat")
 async def api_chat(scan_id: int, request: Request):
-    """Kirim pesan ke Verification Assistant. Secret selalu di-mask sebelum keluar."""
+    """Kirim pesan ke Verification Assistant. Secret selalu di-mask sebelum keluar.
+
+    mode="validate" (fitur Validate with Agent di Live Verifier):
+    kirim module + target verifier -> prompt validasi dibangun server-side
+    (temuan + evidence verifier, semua ter-mask), jawaban mengikuti playbook.
+    """
     data = await request.json()
+    mode = (data.get("mode") or "chat").strip().lower()
     message = (data.get("message") or "").strip()
-    if not message:
-        raise HTTPException(400, "message is required")
     secret_id = data.get("secret_id") or None
+
+    validation_ctx = None
+    if mode == "validate":
+        module = (data.get("module") or "").strip()
+        target = (data.get("target") or "").strip()
+        if not target:
+            raise HTTPException(400, "target is required for mode=validate")
+        validation_ctx = {"module": module, "target": target}
+    elif not message:
+        raise HTTPException(400, "message is required")
 
     cfg = get_llm_config()
     if not cfg["configured"]:
@@ -1362,6 +1376,24 @@ async def api_chat(scan_id: int, request: Request):
         if secret_row:
             cache_rows = await get_verification_cache(db, scan_id)
             verifier_rows = [dict(r) for r in cache_rows]
+
+        # Mode validate: bangun prompt validasi (server-side, secret ter-mask)
+        if validation_ctx:
+            module = validation_ctx["module"]
+            target_raw = validation_ctx["target"]
+            target_masked = mask_secret(target_raw)
+            evidence = ""
+            if verifier_rows:
+                for row in verifier_rows:
+                    if row.get("module") == module and (row.get("target") or "") == target_raw:
+                        ev = re.sub(r"<[^>]+>", " ", row.get("result_html") or "")
+                        evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+                        break
+            # fallback: temukan evidence via secret match bila row target tidak persis
+            if not evidence and secret_row:
+                ev = re.sub(r"<[^>]+>", " ", str(secret_row.get("context") or ""))
+                evidence = re.sub(r"\s+", " ", ev).strip()[:600]
+            message = build_validation_message(secret_row, module, target_masked, evidence)
 
         history_rows = await get_chat_history(db, scan_id, secret_id)
         history = [{"role": r["role"], "content": r["content"]} for r in history_rows]

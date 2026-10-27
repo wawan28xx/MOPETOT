@@ -19,9 +19,87 @@ import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+
+# ---------------- Skills (folder ../skills, di-inject ke system prompt) ----------
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+SKILLS_TOTAL_CAP = 9000  # total karakter semua skill yang di-inject ke prompt
+_skills_cache = {"mtime": None, "text": ""}
+
+
+def load_skills() -> str:
+    """Baca semua skills/*.md -> satu blok teks untuk system prompt.
+
+    Cache mtime: reload hanya jika ada file yang berubah/berkurang.
+    Cap total SKILLS_TOTAL_CAP karakter (sisanya dipotong + penanda).
+    """
+    try:
+        files = sorted(SKILLS_DIR.glob("*.md")) if SKILLS_DIR.is_dir() else []
+        stamp = tuple((f.name, f.stat().st_mtime, f.stat().st_size) for f in files)
+    except OSError:
+        files, stamp = [], None
+    if stamp == _skills_cache["mtime"]:
+        return _skills_cache["text"]
+
+    parts = []
+    total = 0
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if not content:
+            continue
+        room = SKILLS_TOTAL_CAP - total
+        if room <= 200:
+            break
+        if len(content) > room:
+            content = content[:room] + "\n[TRUNCATED - kurangi ukuran skill]"
+        parts.append("### SKILL: " + f.stem.upper() + "\n" + content)
+        total += len(content)
+
+    text = "\n\n".join(parts)
+    _skills_cache["mtime"] = stamp
+    _skills_cache["text"] = text
+    return text
+
+
+def _scrub_secret(text: str, secret: Optional[dict]) -> str:
+    """Ganti kemunculan nilai secret mentah dalam teks dengan versi ter-mask."""
+    m = str((secret or {}).get("match") or "")
+    if text and m and m in text:
+        return text.replace(m, mask_secret(m))
+    return text or ""
+
+
+def build_validation_message(secret, module: str, target_masked: str,
+                             evidence: str) -> str:
+    """Bangun prompt VALIDASI temuan (fitur Validate with Agent di Live Verifier)."""
+    lines = ["VALIDATION REQUEST - ikuti verification playbook."]
+    if secret:
+        lines.append(
+            "- Rule: %s | Category: %s | Severity awal: %s" % (
+                secret.get("rule_id") or "-",
+                secret.get("category") or "-",
+                secret.get("severity") or "-"))
+        lines.append("- File: %s line %s" % (
+            secret.get("file_path") or "-", secret.get("line_number") or "?"))
+        ctx = _scrub_secret((secret.get("context") or "").strip(), secret)
+        if ctx:
+            lines.append("- Kode sekitar: " + ctx[:300])
+    lines.append("- Live Verifier module: " + (module or "-"))
+    lines.append("- Target (ter-mask): " + (target_masked or "-"))
+    evidence = _scrub_secret(evidence, secret)
+    if evidence:
+        lines.append("- Hasil verifier: " + evidence[:600])
+    else:
+        lines.append("- Hasil verifier: belum dijalankan (nyatakan di verdict).")
+    lines.append("Berikan: VERDICT (CONFIRMED/LIKELY/UNCONFIRMED) + EVIDENCE + "
+                 "LATERAL MOVEMENT + SEVERITY (P1-P5) + NEXT SAFE STEPS.")
+    return "\n".join(lines)
 
 VIBE_DEFAULT_MODEL = "glm-5-3"        # alias model di ~/.vibe/config.toml
 VIBE_DEFAULT_TIMEOUT = 240            # detik; override MOBILE_AUDIT_VIBE_TIMEOUT
@@ -278,7 +356,9 @@ def ask_assistant(secret: dict, verifier_rows: Optional[List[dict]],
                   history: Optional[List[dict]], user_message: str,
                   config: Optional[dict] = None) -> str:
     """Satu putaran percakapan. history = list of {role, content} (lama -> baru)."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    skills = load_skills()
+    sys_content = SYSTEM_PROMPT if not skills else SYSTEM_PROMPT + "\n\n" + skills
+    messages = [{"role": "system", "content": sys_content}]
     if secret:
         messages.append({"role": "system", "content": build_finding_context(secret, verifier_rows)})
     if history:

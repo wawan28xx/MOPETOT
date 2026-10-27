@@ -31,6 +31,29 @@ assert chat.mask_secret("short") == "sh****"
 assert chat.mask_secret("") == ""
 print("[2] mask_secret OK")
 
+# --- skills: playbook + context terbaca untuk system prompt ---
+skills_txt = chat.load_skills()
+assert "verification-playbook" in skills_txt.lower() or "VERDICT" in skills_txt
+assert len(skills_txt) <= chat.SKILLS_TOTAL_CAP + 200
+print(f"[2b] load_skills OK ({len(skills_txt)} chars)")
+
+# --- build_validation_message: tidak boleh bocorkan nilai secret mentah ---
+_secret = {
+    "rule_id": "google_api_key", "category": "Google", "severity": "HIGH",
+    "file_path": "res/values/strings.xml", "line_number": 4086,
+    "match": "AIzaSyABCDEF1234567890abcdefghij",
+    "context": '<string name="google_api_key">AIzaSyABCDEF1234567890abcdefghij</string>',
+}
+_ev = "Google API key AIzaSyABCDEF1234567890abcdefghij RESTRICTED di 10 scopes"
+_msg = chat.build_validation_message(
+    _secret, "google-api", chat.mask_secret(_secret["match"]), _ev)
+assert "AIzaSyABCDEF1234567890abcdefghij" not in _msg, "LEAK raw secret di prompt validasi!"
+assert "AIzaSy********ghij" in _msg
+assert "VERDICT" in _msg
+_msg_nosecret = chat.build_validation_message(None, "firebase", "https://x.firebaseio.com", "")
+assert "firebase" in _msg_nosecret
+print("[2c] build_validation_message OK (secret ter-mask, tanpa secret juga aman)")
+
 # --- config: default = vibe CLI, model glm-5-3 ---
 for k in ("MOBILE_AUDIT_LLM_PROVIDER", "MOBILE_AUDIT_LLM_MODEL",
           "MOBILE_AUDIT_LLM_BASE_URL", "MOBILE_AUDIT_LLM_API_KEY",
