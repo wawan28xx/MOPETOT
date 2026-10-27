@@ -17,6 +17,27 @@ class PoCEngine:
 
     def __init__(self, corpus_dir: Optional[Path] = None):
         self.corpus_dir = corpus_dir
+        # index corpus: dibangun SEKALI (bukan rglob per komponen) — fix quadratic
+        self._corpus_java: Optional[List[Path]] = None
+        self._corpus_smali: Optional[List[Path]] = None
+
+    def _java_index(self) -> List[Path]:
+        if self._corpus_java is None:
+            try:
+                self._corpus_java = (list(self.corpus_dir.rglob("*.java"))
+                                     if self.corpus_dir and self.corpus_dir.exists() else [])
+            except OSError:
+                self._corpus_java = []
+        return self._corpus_java
+
+    def _smali_index(self) -> List[Path]:
+        if self._corpus_smali is None:
+            try:
+                self._corpus_smali = (list(self.corpus_dir.rglob("*.smali"))
+                                     if self.corpus_dir and self.corpus_dir.exists() else [])
+            except OSError:
+                self._corpus_smali = []
+        return self._corpus_smali
 
     def extract_intent_extras_from_file(self, file_path: Path) -> List[Dict[str, Any]]:
         """Mengekstrak ekstra intent (String, Int, Boolean, Uri query) dari file Java atau Smali."""
@@ -94,24 +115,29 @@ class PoCEngine:
         return extras
 
     def find_component_source_files(self, component_name: str) -> List[Path]:
-        """Mencari file .java atau .smali yang sesuai dengan nama class komponen."""
-        if not self.corpus_dir or not self.corpus_dir.exists():
-            return []
+        """Mencari file .java atau .smali yang sesuai dengan nama class komponen.
 
+        Pakai index corpus yang dibangun sekali (satu walk) lalu cocokkan di
+        memori — bukan rglob seluruh corpus per komponen (dulu kuadratik:
+        N komponen x N file = menit untuk corpus besar).
+        """
         rel_path_part = component_name.replace(".", "/")
         simple_name = component_name.split(".")[-1]
-        matches = []
 
-        for p in self.corpus_dir.rglob("*.java"):
-            if rel_path_part in str(p).replace("\\", "/") or simple_name in p.name:
-                matches.append(p)
+        def _match(files: List[Path]) -> List[Path]:
+            out = []
+            for p in files:
+                s = str(p)
+                if rel_path_part in s.replace("\\", "/") or simple_name in p.name:
+                    out.append(p)
+                    if len(out) >= 3:
+                        break
+            return out
 
+        matches = _match(self._java_index())
         if not matches:
-            for p in self.corpus_dir.rglob("*.smali"):
-                if rel_path_part in str(p).replace("\\", "/") or simple_name in p.name:
-                    matches.append(p)
-
-        return matches[:3]
+            matches = _match(self._smali_index())
+        return matches
 
     def generate_component_poc(self, package_name: str, component: Dict[str, Any]) -> Dict[str, Any]:
         """Menghasilkan PoC terinci untuk komponen yang diekspor dengan ekstraksi parameter asli."""
@@ -1280,3 +1306,63 @@ _JS_FLUTTER = """        // ====================================================
         });
 """
 
+
+
+# ======================================================================
+# Build payload PoC (dipanggil dari app.py — bisa dijalankan di process
+# pool terpisah supaya tidak berebut GIL dengan event loop server:
+# Live Verifier tetap responsif saat PoC di-generate).
+# ======================================================================
+
+POC_PAYLOAD_VERSION = 2  # v2: + secret_pocs (PoC siap jalan per temuan Secrets & Keys)
+
+
+def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path,
+                       secrets: List[Dict[str, Any]] = None) -> dict:
+    """Rakit seluruh payload PoC (komponen, deeplink, secret) — CPU/IO berat."""
+    poc_engine = PoCEngine(corpus_dir=corpus_dir if corpus_dir and corpus_dir.exists() else None)
+    pkg_name = (manifest_obj or {}).get("package_name") or scan_obj.get("package_name") or "com.target.app"
+
+    comps_raw = []
+    deeplinks_raw = []
+    if manifest_obj:
+        try:
+            comps_raw = json.loads(manifest_obj.get("components") or "[]")
+        except Exception:
+            comps_raw = []
+        try:
+            deeplinks_raw = json.loads(manifest_obj.get("deep_links") or "[]")
+        except Exception:
+            deeplinks_raw = []
+
+    component_pocs = []
+    if isinstance(comps_raw, list):
+        for c in comps_raw:
+            if isinstance(c, dict) and (c.get("exported") in (True, "true", "True")):
+                component_pocs.append(poc_engine.generate_component_poc(pkg_name, c))
+
+    deeplink_pocs = []
+    for dl in deeplinks_raw:
+        if isinstance(dl, str):
+            dl_str = dl
+        elif isinstance(dl, list):
+            # scheme/host list bisa berisi None — saring sebelum join
+            parts = [str(x) for x in dl if x]
+            dl_str = "://".join(parts) if parts else ""
+        else:
+            dl_str = str(dl) if dl else ""
+        if not dl_str:
+            continue
+        deeplink_pocs.append(poc_engine.generate_deeplink_poc(pkg_name, dl_str))
+
+    # Tier 1: PoC siap jalan per temuan Secrets & Keys (deterministic template)
+    secret_pocs = poc_engine.generate_secret_pocs(secrets or [])
+
+    return {
+        "package_name": pkg_name,
+        "component_pocs": component_pocs,
+        "deeplink_pocs": deeplink_pocs,
+        "secret_pocs": secret_pocs,
+        "poc_version": POC_PAYLOAD_VERSION,
+        "total_pocs": len(component_pocs) + len(deeplink_pocs) + len(secret_pocs),
+    }

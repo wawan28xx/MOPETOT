@@ -35,7 +35,21 @@ from verification import (
     check_aws_sts_identity, check_stripe_key, check_webhook_status
 )
 
-from poc_engine import PoCEngine
+from poc_engine import PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION
+from concurrent.futures import ProcessPoolExecutor
+
+# PoC build jalan di PROCESS pool: CPU-bound berat (walk corpus + regex)
+# harusnya gak boleh berebut GIL dengan event loop — Live Verifier
+# (firebase/google/aws/...) tetap responsif penuh saat PoC di-generate.
+_POC_POOL = None
+
+
+def _poc_pool() -> ProcessPoolExecutor:
+    global _POC_POOL
+    if _POC_POOL is None:
+        _POC_POOL = ProcessPoolExecutor(max_workers=2)
+    return _POC_POOL
+
 from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, agent_job_new, agent_job_get, agent_job_finish, make_logger
 import code_explorer as ce
 
@@ -95,7 +109,11 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if path == "/logout" or path.startswith(PUBLIC_PATHS):
         return await call_next(request)
-    if not session_valid(request.cookies.get(SESSION_COOKIE)):
+    ok = session_valid(request.cookies.get(SESSION_COOKIE))
+    if os.environ.get("MOPETOT_DEBUG_AUTH"):
+        print("[auth-mw]", path, "| cookie:", repr(request.cookies.get(SESSION_COOKIE))[:20],
+              "| valid:", ok, "| all-cookies:", list(request.cookies.keys()), flush=True)
+    if not ok:
         if path.startswith("/api/"):
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
         return RedirectResponse("/login", status_code=303)
@@ -949,60 +967,6 @@ def extract_report_metadata(report_file: Path) -> dict:
     return meta
 
 
-POC_PAYLOAD_VERSION = 2  # v2: + secret_pocs (PoC siap jalan per temuan Secrets & Keys)
-
-
-def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path,
-                       secrets: List[Dict[str, Any]] = None) -> dict:
-    """CPU and filesystem-heavy PoC extraction moved off event-loop thread."""
-    poc_engine = PoCEngine(corpus_dir=corpus_dir if corpus_dir and corpus_dir.exists() else None)
-    pkg_name = (manifest_obj or {}).get("package_name") or scan_obj.get("package_name") or "com.target.app"
-
-    comps_raw = []
-    deeplinks_raw = []
-    if manifest_obj:
-        try:
-            comps_raw = json.loads(manifest_obj.get("components") or "[]")
-        except Exception:
-            comps_raw = []
-        try:
-            deeplinks_raw = json.loads(manifest_obj.get("deep_links") or "[]")
-        except Exception:
-            deeplinks_raw = []
-
-    component_pocs = []
-    if isinstance(comps_raw, list):
-        for c in comps_raw:
-            if isinstance(c, dict) and (c.get("exported") in (True, "true", "True")):
-                component_pocs.append(poc_engine.generate_component_poc(pkg_name, c))
-
-    deeplink_pocs = []
-    for dl in deeplinks_raw:
-        if isinstance(dl, str):
-            dl_str = dl
-        elif isinstance(dl, list):
-            # scheme/host list bisa berisi None — saring sebelum join
-            parts = [str(x) for x in dl if x]
-            dl_str = "://".join(parts) if parts else ""
-        else:
-            dl_str = str(dl) if dl else ""
-        if not dl_str:
-            continue
-        deeplink_pocs.append(poc_engine.generate_deeplink_poc(pkg_name, dl_str))
-
-    # Tier 1: PoC siap jalan per temuan Secrets & Keys (deterministic template)
-    secret_pocs = poc_engine.generate_secret_pocs(secrets or [])
-
-    return {
-        "package_name": pkg_name,
-        "component_pocs": component_pocs,
-        "deeplink_pocs": deeplink_pocs,
-        "secret_pocs": secret_pocs,
-        "poc_version": POC_PAYLOAD_VERSION,
-        "total_pocs": len(component_pocs) + len(deeplink_pocs) + len(secret_pocs),
-    }
-
-
 @app.get("/api/scan/{scan_id}")
 async def api_scan_detail(scan_id: int):
     """Return scan details + manifest_info, findings summary, secrets summary, report metadata."""
@@ -1653,7 +1617,8 @@ async def api_get_pocs(scan_id: int, force: int = 0, lazy: int = 0):
         corpus_dir = result_dir / "work" / "corpus"
         scan_obj = dict(scan)
         manifest_obj = dict(manifest) if manifest else {}
-        payload = await asyncio.to_thread(build_pocs_payload, scan_obj, manifest_obj, corpus_dir, secrets)
+        payload = await asyncio.get_running_loop().run_in_executor(
+            _poc_pool(), build_pocs_payload, scan_obj, manifest_obj, corpus_dir, secrets)
         await upsert_poc_cache(db, scan_id, json.dumps(payload))
         payload["from_cache"] = False
         return JSONResponse(payload)
