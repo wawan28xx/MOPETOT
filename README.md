@@ -17,7 +17,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Verification Assistant**: AI chatbox via vibe CLI lokal — secret selalu ter-mask sebelum dikirim ke model.
 - **Login auth**: seluruh halaman & API diproteksi session cookie.
 - **Live Verifier**: Firebase, Google API key scopes, endpoint, IP, AWS STS, Stripe, webhook — tiap baris punya tombol **🤖 Validate with Agent** untuk validasi temuan via AI (mode `validate`).
-- **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih temuan CRITICAL/HIGH dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5.
+- **Validate Finding (Agent AI)**: seksi di atas PoC Generator — pilih satu temuan CRITICAL/HIGH atau **Validate Semua** (default) dari Secrets & Keys, agent menilai valid/tidak (mis. konstanta SDK vs kredensial nyata), sejauh mana exploitability-nya, dan menetapkan verdict + severity P1–P5. Tiap hasil jadi **thread chat interaktif** — pentester bisa debat / mengarahkan ulang hasil validasi agent langsung dari kartu temuan.
 - **Skill REA-style**: `skills/verification-playbook.md` + `skills/mopetot-context.md` di-inject otomatis ke system prompt AI (evidence-first, verdict CONFIRMED/LIKELY/UNCONFIRMED, lateral movement, severity P1-P5).
 - **PoC generator**: ADB intent extras, deep link trigger, Frida bypass script, HTML exploit builder.
 - **Ekstraksi endpoint, manifest, framework, metadata SHA-256, tech stack, indikasi RASP.**

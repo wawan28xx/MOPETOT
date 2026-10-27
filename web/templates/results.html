@@ -1464,7 +1464,7 @@ function loadLiveVerifier() {
     // ==========================================
     // 🤖 VALIDATE FINDING (AGENT AI) — di atas PoC Generator
     // ==========================================
-    const vfCandidates = (globalSecrets || []).filter(function(s) {
+    window.vfCandidates = (globalSecrets || []).filter(function(s) {
         const sev = String(s.severity || '').toUpperCase();
         return sev === 'CRITICAL' || sev === 'HIGH';
     });
@@ -1474,16 +1474,18 @@ function loadLiveVerifier() {
     html += '<span class="section-count">' + vfCandidates.length + '</span>';
     html += '</div>';
     html += '<div class="section-content">';
-    html += '<p class="subtitle" style="margin-bottom:12px;">Agent memvalidasi temuan Secrets &amp; Keys satu per satu: valid / tidak valid, sejauh mana exploitability-nya (mis. encrypt key \u2192 data apa yang bisa dibuka), lalu menetapkan verdict + severity P1\u2013P5 sesuai verification playbook:</p>';
+    html += '<p class="subtitle" style="margin-bottom:12px;">Agent memvalidasi temuan Secrets &amp; Keys: valid / tidak valid, sejauh mana exploitability-nya (mis. encrypt key \u2192 data apa yang bisa dibuka), lalu menetapkan verdict + severity P1\u2013P5 sesuai verification playbook. Setelah hasil keluar, lu bisa <b style="color:#00f0ff;">debat / arahkan agent langsung</b> lewat kotak chat di tiap temuan:</p>';
     if (vfCandidates.length > 0) {
         html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px;">';
         html += '<select id="vf-finding-select" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; max-width:520px; font-family:var(--font-mono);">';
+        html += '<option value="all" selected>🔍 Validate Semua — ' + vfCandidates.length + ' temuan CRITICAL/HIGH</option>';
         vfCandidates.slice(0, 100).forEach(function(s) {
             const label = '[' + String(s.severity || '?').toUpperCase() + '] ' + escHtml(s.rule_id || s.category || 'finding') + ' \u2014 ' + escHtml(String(s.file_path || '?').split('/').pop()) + ':' + escHtml(String(s.line_number || '?'));
             html += '<option value="' + s.id + '">' + label + '</option>';
         });
         html += '</select>';
         html += '<button class="btn btn-sm btn-primary" id="vf-run-btn" onclick="runFindingValidation()" style="display:flex; align-items:center; gap:6px;">🤖 Validate Finding</button>';
+        html += '<button class="btn btn-sm" id="vf-stop-btn" onclick="window._vfStop = true" style="display:none; align-items:center; gap:6px; border:1px solid #ff2d55; color:#ff2d55;">⏹ Stop</button>';
         html += '</div>';
         html += '<div id="vf-result"></div>';
     } else {
@@ -2680,41 +2682,142 @@ function vfSeverityBadge(reply) {
     return '<span style="display:inline-block; margin-left:8px; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:1px; color:' + c + '; border:1px solid ' + c + '; background:' + c + '1a;">SEVERITY: P' + p + '</span>';
 }
 
-function runFindingValidation() {
+function vfFmt(text) {
+    // escape lalu izinkan **bold** markdown sederhana
+    return escHtml(text).replace(/\*\*([^*]+)\*\*/g, '<b style="color:#00f0ff;">$1</b>');
+}
+
+function vfAppendMsg(sid, role, content, thinking) {
+    var msgs = document.getElementById('vf-msgs-' + sid);
+    if (!msgs) return null;
+    var div = document.createElement('div');
+    div.className = role === 'user' ? 'vf-msg-user' : 'vf-msg-bot' + (thinking ? ' vf-thinking' : '');
+    div.innerHTML = vfFmt(content);
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+}
+
+function vfCreateThread(sec) {
+    var res = document.getElementById('vf-result');
+    var sid = sec.id;
+    var label = (sec.rule_id || sec.category || 'finding') + ' @ ' + String(sec.file_path || '?').split('/').pop() + ':' + (sec.line_number || '?');
+    var thread = document.createElement('div');
+    thread.className = 'vf-thread';
+    thread.innerHTML = ''
+        + '<div class="vf-thread-head">'
+        + '<span class="vf-thread-title">🔎 ' + escHtml(label) + '</span>'
+        + '<span id="vf-badges-' + sid + '"></span>'
+        + '</div>'
+        + '<div class="vf-msgs" id="vf-msgs-' + sid + '"></div>'
+        + '<div class="vf-input-row">'
+        + '<input id="vf-in-' + sid + '" placeholder="Debat / arahkan agent tentang temuan ini... (Enter untuk kirim)" onkeydown="if(event.key===\'Enter\'){vfFollowUp(' + sid + ');}">'
+        + '<button class="vf-send-btn" id="vf-send-' + sid + '" onclick="vfFollowUp(' + sid + ')">➤</button>'
+        + '</div>';
+    res.appendChild(thread);
+    return thread;
+}
+
+function vfSetBadges(sid, reply) {
+    var holder = document.getElementById('vf-badges-' + sid);
+    if (holder) holder.innerHTML = vfVerdictBadge(reply) + vfSeverityBadge(reply);
+}
+
+async function vfRunOne(sec) {
+    var sid = sec.id;
+    vfCreateThread(sec);
+    var think = vfAppendMsg(sid, 'bot', '⏳ Agent memvalidasi temuan (playbook + evidence)... bisa 10-60 detik.', true);
+    try {
+        var r = await fetch('/api/scan/' + SCAN_ID + '/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: 'validate', secret_id: sid})
+        });
+        var j = await r.json().catch(function() { return {}; });
+        if (think) think.remove();
+        if (r.ok && j.reply) {
+            vfSetBadges(sid, j.reply);
+            vfAppendMsg(sid, 'bot', j.reply);
+        } else {
+            vfAppendMsg(sid, 'bot', '❌ ' + ((j.detail || j.error) || 'Gagal validasi.'));
+        }
+    } catch (e) {
+        if (think) think.remove();
+        vfAppendMsg(sid, 'bot', '❌ Gagal terhubung ke server.');
+    }
+}
+
+async function vfFollowUp(sid) {
+    var input = document.getElementById('vf-in-' + sid);
+    var send = document.getElementById('vf-send-' + sid);
+    var msg = (input && input.value || '').trim();
+    if (!msg || (send && send.disabled)) return;
+    input.value = '';
+    input.disabled = true;
+    if (send) send.disabled = true;
+    vfAppendMsg(sid, 'user', msg);
+    var think = vfAppendMsg(sid, 'bot', '⏳ Agent mikir...', true);
+    try {
+        var r = await fetch('/api/scan/' + SCAN_ID + '/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: 'chat', secret_id: sid, message: msg})
+        });
+        var j = await r.json().catch(function() { return {}; });
+        if (think) think.remove();
+        if (r.ok && j.reply) {
+            vfSetBadges(sid, j.reply);
+            vfAppendMsg(sid, 'bot', j.reply);
+        } else {
+            vfAppendMsg(sid, 'bot', '❌ ' + ((j.detail || j.error) || 'Gagal.'));
+        }
+    } catch (e) {
+        if (think) think.remove();
+        vfAppendMsg(sid, 'bot', '❌ Gagal terhubung ke server.');
+    }
+    input.disabled = false;
+    if (send) send.disabled = false;
+    input.focus();
+}
+
+async function runFindingValidation() {
     var sel = document.getElementById('vf-finding-select');
     var res = document.getElementById('vf-result');
     var btn = document.getElementById('vf-run-btn');
+    var stopBtn = document.getElementById('vf-stop-btn');
     if (!sel || !sel.value || !res) return;
-    var sid = parseInt(sel.value, 10);
-    var sec = null;
-    for (var i = 0; i < globalSecrets.length; i++) {
-        if (globalSecrets[i].id === sid) { sec = globalSecrets[i]; break; }
-    }
-    btn.disabled = true;
-    var label = sec ? ((sec.rule_id || sec.category || 'finding') + ' @ ' + String(sec.file_path || '?').split('/').pop() + ':' + (sec.line_number || '?')) : 'finding #' + sid;
-    res.innerHTML = '<div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--bg-card); font-size:13px; color:var(--text-secondary);"><span class="inline-block animate-pulse">⏳ Agent memvalidasi ' + escHtml(label) + ' — membaca playbook + evidence... (bisa 10-60 detik)</span></div>';
-    fetch('/api/scan/' + SCAN_ID + '/chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: 'validate', secret_id: sid})
-    })
-    .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
-    .then(function(out) {
-        btn.disabled = false;
-        if (out.ok && out.j.reply) {
-            var badges = vfVerdictBadge(out.j.reply) + vfSeverityBadge(out.j.reply);
-            res.innerHTML = '<div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--bg-card);">'
-                + '<div style="margin-bottom:10px;">' + (badges || '') + '</div>'
-                + '<pre style="margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--font-mono); font-size:12px; line-height:1.6; color:var(--text-primary);">' + escHtml(out.j.reply) + '</pre>'
-                + '</div>';
-        } else {
-            res.innerHTML = '<div style="border:1px solid #ff2d55; border-radius:10px; padding:14px; background:var(--bg-card); color:#ff2d55; font-size:13px;">❌ ' + escHtml((out.j && (out.j.detail || out.j.error)) || 'Gagal validasi.') + '</div>';
+
+    var list = [];
+    var vfCandidates = window.vfCandidates || [];
+    if (sel.value === 'all') {
+        list = vfCandidates.slice(0, 20);
+    } else {
+        var sid = parseInt(sel.value, 10);
+        for (var i = 0; i < globalSecrets.length; i++) {
+            if (globalSecrets[i].id === sid) { list = [globalSecrets[i]]; break; }
         }
-    })
-    .catch(function() {
-        btn.disabled = false;
-        res.innerHTML = '<div style="border:1px solid #ff2d55; border-radius:10px; padding:14px; background:var(--bg-card); color:#ff2d55; font-size:13px;">❌ Gagal terhubung ke server.</div>';
-    });
+    }
+    if (!list.length) return;
+
+    window._vfStop = false;
+    res.innerHTML = '';
+    btn.disabled = true;
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
+
+    var prog = document.createElement('div');
+    prog.className = 'vf-progress';
+    res.appendChild(prog);
+    var truncated = (sel.value === 'all' && vfCandidates.length > 20)
+        ? ' (dicap 20 temuan pertama)' : '';
+
+    for (var k = 0; k < list.length; k++) {
+        if (window._vfStop) { prog.innerHTML = '⏹ Dihentikan di temuan ' + (k + 1) + '/' + list.length + truncated; break; }
+        prog.innerHTML = '🤖 Validasi ' + (k + 1) + '/' + list.length + truncated + ' — ' + escHtml(list[k].rule_id || 'finding') + '...';
+        await vfRunOne(list[k]);
+    }
+    if (!window._vfStop) prog.innerHTML = '✅ Selesai: ' + list.length + ' temuan divalidasi' + truncated + '. Scroll tiap kartu untuk debat / arahkan agent.';
+    btn.disabled = false;
+    if (stopBtn) stopBtn.style.display = 'none';
 }
 
 function openFridaModalDirect() {

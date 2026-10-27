@@ -814,3 +814,108 @@ footer.footer { position: relative; z-index: 1; }
     .bgm-playing .bgm-bar { animation: none !important; }
     body::after { display: none; }
 }
+
+/* ===================== Validate Finding (Agent AI) — thread chat ===================== */
+.vf-progress {
+    font-size: 12px;
+    font-weight: 700;
+    color: #ff00ea;
+    font-family: var(--font-mono);
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+}
+.vf-thread {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 14px;
+    background: var(--bg-card);
+    overflow: hidden;
+    box-shadow: 0 0 18px rgba(255, 0, 234, 0.06);
+}
+.vf-thread-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 0, 234, 0.05);
+    flex-wrap: wrap;
+}
+.vf-thread-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    word-break: break-all;
+}
+.vf-msgs {
+    padding: 12px 14px;
+    max-height: 420px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.vf-msg-user {
+    align-self: flex-end;
+    max-width: 85%;
+    background: rgba(0, 240, 255, 0.10);
+    border: 1px solid rgba(0, 240, 255, 0.45);
+    color: var(--text-primary);
+    border-radius: 14px 14px 4px 14px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.vf-msg-bot {
+    align-self: flex-start;
+    max-width: 92%;
+    background: rgba(255, 0, 234, 0.07);
+    border: 1px solid rgba(255, 0, 234, 0.35);
+    color: var(--text-primary);
+    border-radius: 14px 14px 14px 4px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.vf-msg-bot.vf-thinking { color: var(--text-muted); font-style: italic; border-style: dashed; }
+.vf-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+.vf-input-row input {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    font-family: var(--font-mono);
+}
+.vf-input-row input::placeholder { color: var(--text-muted); }
+.vf-input-row input:focus {
+    outline: none;
+    border-color: #ff00ea;
+    box-shadow: 0 0 8px rgba(255, 0, 234, 0.35);
+}
+.vf-send-btn {
+    background: rgba(255, 0, 234, 0.15);
+    border: 1px solid #ff00ea;
+    color: #ff00ea;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+.vf-send-btn:hover { background: rgba(255, 0, 234, 0.3); }
+.vf-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
