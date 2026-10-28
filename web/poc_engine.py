@@ -1435,9 +1435,9 @@ def generate_dart_hook_script(blutter_dir: Path, app_package: str,
     tpl = frida_tpl.read_text(encoding="utf-8", errors="replace")
 
     funcs = _parse_dart_functions(blutter_dir / "asm")
-    app_pkg = (app_package or "").split(".")[-1].lower()
+    app_pkg = _match_dart_app_pkg(sorted({f[0] for f in funcs}), app_package)
     # prioritas: package app sendiri; sisanya non-library
-    own = [f for f in funcs if f[0].lower() == app_pkg]
+    own = [f for f in funcs if f[0] == app_pkg]
     others = [f for f in funcs
               if not any(f[0].lower().startswith(p) for p in _DART_LIB_PKGS_PREFIX)]
     selected = own if own else others
@@ -1491,3 +1491,234 @@ def generate_dart_hook_script(blutter_dir: Path, app_package: str,
         " * Jalankan: frida -U -f <package> -l dart_hooks.js\n"
         " */\n")
     return header + script
+
+
+# ======================================================================
+# DART UTILITIES (blutter): inspector, diff, AI context, routes
+# ======================================================================
+
+_DART_TTL_CACHE: Dict[str, Any] = {}  # asm_dir -> {"mtime": ..., "funcs": [...]}
+
+def _match_dart_app_pkg(dart_pkgs, app_package: str) -> str:
+    """Cocokkan package Dart dengan android package.
+    Kasus: com.pegadaianagen -> dart 'agen' (suffix), com.foo.barapp -> 'barapp'."""
+    target = (app_package or "").lower().replace("_", "")
+    if not target:
+        return ""
+    last = target.split(".")[-1]
+    for p in dart_pkgs:
+        if p.lower() == last:
+            return p
+    # substring: dart pkg ada di dalam nama android package (ambil terpanjang)
+    cands = sorted((p for p in dart_pkgs if p and p.lower() in target), key=len, reverse=True)
+    return cands[0] if cands else ""
+
+
+
+
+def _parse_dart_functions_all(asm_dir: Path) -> List[tuple]:
+    """Semua function Dart dari asm/ (pkg, class, method, addr) + cache mtime."""
+    if not asm_dir.exists():
+        return []
+    try:
+        stamp = asm_dir.stat().st_mtime
+    except OSError:
+        return []
+    key = str(asm_dir)
+    cached = _DART_TTL_CACHE.get(key) or {}
+    if cached.get("mtime") == stamp and cached.get("funcs"):
+        return cached["funcs"]
+    out = []
+    for pkg_dir in sorted(asm_dir.iterdir()):
+        if not pkg_dir.is_dir():
+            continue
+        for f in pkg_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            try:
+                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            cls = ""
+            last_method = ""
+            rel = str(f.relative_to(asm_dir.parent))
+            for line in lines:
+                m = re.match(r"^class\s+([\w$]+)", line)
+                if m:
+                    cls = m.group(1)
+                    continue
+                mm = _DART_METHOD_LINE.match(line)
+                if mm and not line.strip().startswith("//"):
+                    last_method = mm.group(1)
+                    continue
+                ma = _DART_ADDR_LINE.search(line)
+                if ma and last_method:
+                    out.append((pkg_dir.name, cls, last_method, ma.group(1), rel))
+                    last_method = ""
+    _DART_TTL_CACHE[key] = {"mtime": stamp, "funcs": out}
+    return out
+
+
+def dart_packages(blutter_dir: Path) -> List[Dict[str, Any]]:
+    """Inventory package Dart dari hasil blutter (+ jumlah function)."""
+    asm = blutter_dir / "asm"
+    if not asm.exists():
+        return []
+    funcs = _parse_dart_functions_all(asm)
+    counts: Dict[str, int] = {}
+    for pkg, _, _, _, _ in funcs:
+        counts[pkg] = counts.get(pkg, 0) + 1
+    out = [{"package": p, "functions": counts.get(p, 0)} for p in sorted(counts)]
+    return out
+
+
+def dart_package_detail(blutter_dir: Path, package: str) -> List[Dict[str, Any]]:
+    """Detail function satu package Dart (file, class, method, addr)."""
+    asm = blutter_dir / "asm"
+    funcs = _parse_dart_functions_all(asm)
+    return [
+        {"file": rel, "cls": cls, "method": method, "addr": addr}
+        for pkg, cls, method, addr, rel in funcs if pkg == package
+    ]
+
+
+def dart_routes(blutter_dir: Path, corpus_dir: Path, limit: int = 200) -> List[str]:
+    """Daftar route Flutter (dari flutter_routes.txt corpus / strings Dart)."""
+    routes_file = corpus_dir / "flutter_dart" / "flutter_routes.txt"
+    if routes_file.exists():
+        try:
+            raw = [r.strip() for r in routes_file.read_text(encoding="utf-8",
+                    errors="replace").splitlines() if r.strip()]
+            # hanya route yang valid: mulai huruf, min 3 char per segmen pertama
+            good = [r for r in raw if re.match(r"^/[a-z][a-z0-9_-]{2,}(?:/[a-z0-9_.-]+)*$", r, re.I)]
+            return (good or raw)[:limit]
+        except OSError:
+            return []
+    return []
+
+
+def summarize_dart_context(blutter_dir: Path, app_package: str,
+                           cap: int = 2500) -> str:
+    """Ringkasan class/function Dart app (package app sendiri) untuk konteks AI.
+    Fokus: class auth/login/crypto/credential/api + jumlah total per class."""
+    asm = blutter_dir / "asm"
+    funcs = _parse_dart_functions_all(asm)
+    app_pkg = _match_dart_app_pkg(sorted({f[0] for f in funcs}), app_package)
+    own = [f for f in funcs if f[0] == app_pkg]
+    if not own:
+        return ""
+    classes: Dict[str, List[str]] = {}
+    for _, cls, method, _, _ in own:
+        if not cls:
+            continue
+        methods = classes.setdefault(cls, [])
+        if method not in methods and len(methods) < 12:
+            methods.append(method)
+    # nama class CamelCase (AuthDataStore) tidak match  regex method — pakai substring.
+    # keyword kuat (auth/login/credential/...) didahulukan sebelum yang lemah (api/user/...)
+    _strong = re.compile(r"(?i)(login|auth|token|password|credential|encrypt|"
+                         r"decrypt|secret|otp|session|pin|sign)")
+    _weak = re.compile(r"(?i)(api|user|account|key|security|otp)")
+    strong_cls = {c: m for c, m in classes.items()
+                  if _strong.search(c) or any(_DART_INTERESTING.search(x) for x in m)}
+    weak_cls = {c: m for c, m in classes.items()
+                if c not in strong_cls and _weak.search(c)}
+    other_cls = {c: m for c, m in classes.items() if c not in strong_cls and c not in weak_cls}
+    # skor relevansi: nama class bobot 3, method menarik +1; class UI (Widget/
+    # Screen/Page/State) didemote supaya class logika (AuthDataStore) naik duluan
+    _ui = re.compile(r"(?i)(widget|screen|page|state|view)$|^_")
+    def _score(c, m):
+        sc = sum(3 for _ in _strong.finditer(c))
+        sc += sum(1 for x in m if _DART_INTERESTING.search(x))
+        if _ui.search(c):
+            sc *= 0.4
+        return -sc
+    ranked = sorted(strong_cls.items(), key=lambda kv: (_score(kv[0], kv[1]), kv[0]))
+    lines = [f"Dart app package '{app_pkg}': {len(classes)} class, {len(own)} function."]
+    for c, methods in ranked[:12]:
+        lines.append(f"- {c}: {', '.join(methods)}")
+    for c, methods in list(weak_cls.items())[:6]:
+        lines.append(f"- {c}: {', '.join(methods[:6])}")
+    if other_cls:
+        shown = list(other_cls.items())[:6]
+        lines.append("- class lain (sampel): " + "; ".join(f"{c}({len(m)}+ fn)"
+                    for c, m in shown))
+    text = "\n".join(lines)
+    return text[:cap]
+
+
+def dart_function_diff(dir_a: Path, dir_b: Path) -> Dict[str, Any]:
+    """Diff function Dart dua hasil blutter (versi app berbeda).
+    Bandingkan (pkg, class, method): added / removed / addr_changed."""
+    fa = {(p, c, m): addr for p, c, m, addr, _ in _parse_dart_functions_all(dir_a / "asm")}
+    fb = {(p, c, m): addr for p, c, m, addr, _ in _parse_dart_functions_all(dir_b / "asm")}
+    added = sorted(k for k in fb if k not in fa)
+    removed = sorted(k for k in fa if k not in fb)
+    changed = [k for k in fb if k in fa and fa[k] != fb[k]]
+    return {
+        "added": [{"package": p, "cls": c, "method": m, "addr": fb[(p, c, m)]} for p, c, m in added],
+        "removed": [{"package": p, "cls": c, "method": m} for p, c, m in removed],
+        "addr_changed_count": len(changed),
+        "addr_changed_sample": [{"package": p, "cls": c, "method": m,
+                                 "old": fa[(p, c, m)], "new": fb[(p, c, m)]}
+                                for (p, c, m) in sorted(changed)[:20]],
+        "total_a": len(fa), "total_b": len(fb),
+    }
+
+
+def generate_mitm_addon(package_name: str, hosts: List[str],
+                        api_paths: List[str]) -> str:
+    """Generate mitmproxy addon: log & tag request yang match surface app
+    (host endpoint + api path dari scan) — pasangan dinamis dari statis."""
+    hosts_js = ", ".join('"%s"' % h for h in hosts[:40]) or '"__none__"'
+    paths_js = ", ".join('"%s"' % p for p in api_paths[:60]) or '"__none__"'
+    return f'''"""
+MOPETOT — mitmproxy addon (auto-generated)
+Target: {package_name}
+Fungsi:
+  1. Tag & log semua request ke host endpoint app (dari scan statis)
+  2. Tandai request yang match api_path Dart/retrofit (SEEN-IN-APP)
+  3. Simpan body respons utk endpoint menarik (opsional via env LOG_BODY=1)
+
+Pemakaian:
+  pip install mitmproxy
+  mitmdump -s mopetot_addon.py --listen-port 8080
+  (set proxy device/AVD ke <ip-pc>:8080; pasang CA cert mitmproxy di device)
+Catatan: kalau app pakai SSL pinning, jalankan Frida bypass MOPETOT bersamaan.
+"""
+import os
+
+APP_HOSTS = set()
+for _h in [{hosts_js}]:
+    APP_HOSTS.add(_h)
+
+APP_PATHS = [{paths_js}]
+
+LOG_BODY = os.environ.get("LOG_BODY", "0") == "1"
+_seen = set()
+
+
+class MopetotTagger:
+    def request(self, flow):
+        host = flow.request.pretty_host
+        path = flow.request.path
+        if host in APP_HOSTS or any(host.endswith("." + h) for h in APP_HOSTS):
+            matched = next((p for p in APP_PATHS if p and p in path), None)
+            tag = " [SEEN-IN-APP path=" + matched + "]" if matched else ""
+            print(f"[MOPETOT] {{flow.request.method}} {{host}}{{path}}{{tag}}")
+
+    def response(self, flow):
+        if not LOG_BODY:
+            return
+        host = flow.request.pretty_host
+        if host in APP_HOSTS or any(host.endswith("." + h) for h in APP_HOSTS):
+            key = host + flow.request.path
+            if key in _seen:
+                return
+            _seen.add(key)
+            body = flow.response.text or ""
+            print(f"[MOPETOT-BODY] {{host}}{{flow.request.path}} -> {{body[:400]}}")
+
+
+addons = [MopetotTagger()]
+'''

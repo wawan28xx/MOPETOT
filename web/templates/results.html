@@ -1530,6 +1530,9 @@ function loadLiveVerifier() {
     html += '<button class="btn btn-sm btn-primary" onclick="openFridaModalDirect()" style="display:flex; align-items:center; gap:6px; border-color:#ff2d55;">💉 View Frida Bypass Script (.js)</button>';
     html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
     html += '<button class="btn btn-sm" onclick="openDartHookModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🪝 Dart Function Hooks</button>';
+    html += '<button class="btn btn-sm" onclick="openDartInspectorModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🔍 Dart Inspector</button>';
+    html += '<button class="btn btn-sm" onclick="openRunDeviceModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">▶ Run di Device</button>';
+    html += '<a href="/api/scan/' + SCAN_ID + '/mitm-addon" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;" download>🛡️ mitm Addon</a>';
     html += '</div></div>';
     html += '<div class="section-content" id="rasp-bypass-container">';
     html += '<p class="subtitle" style="margin-bottom:16px;">Frida hook script untuk melewati proteksi runtime target (SSL pinning, root detection, biometric, crypto dumper). Jalankan dengan: <code style="font-family:var(--font-mono); color:#00f0ff;">frida -U -f [package] -l bypass_hooks.js</code></p>';
@@ -1671,7 +1674,7 @@ function loadLiveVerifier() {
         });
         html += '</select>';
     }
-    html += '<input id="cred-url" placeholder="https://endpoint-login-dari-corpus/api/login" style="flex:1; min-width:260px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono);">';
+    html += '<input id="cred-url" list="cred-url-suggestions" placeholder="https://endpoint-login-dari-corpus/api/login" style="flex:1; min-width:260px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono);"><datalist id="cred-url-suggestions"></datalist>';
     html += '<input id="cred-user" placeholder="username" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono); width:140px;">';
     html += '<input id="cred-pass" placeholder="password" type="text" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:var(--font-mono); width:170px;">';
     html += '<button class="btn-verify" id="btn_cred_login" onclick="runCredLoginTest()">▶ Test Login</button>';
@@ -1724,6 +1727,7 @@ function loadLiveVerifier() {
 
     d.innerHTML = html;
     vfEnsureThread();
+    loadLoginSuggestions();
     window._liveVerifierRenderedOnce = true;
     showTabData(6);
     rehydrateVerifierUI();
@@ -2937,6 +2941,25 @@ function vfFindSecret(sid) {
 }
 
 /* SATU thread chat untuk semua temuan (konsep ChatGPT: satu percakapan) */
+function loadLoginSuggestions() {
+    fetch('/api/scan/' + SCAN_ID + '/login-suggestions')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+            if (!d) return;
+            var dl = document.getElementById('cred-url-suggestions');
+            if (dl) {
+                var opts = '';
+                (d.api_paths || []).forEach(function(p) {
+                    (d.hosts || []).forEach(function(h) {
+                        opts += '<option value="https://' + escHtml(h) + escHtml(p) + '">';
+                    });
+                });
+                dl.innerHTML = opts;
+            }
+        })
+        .catch(function() {});
+}
+
 function vfEnsureThread() {
     if (document.getElementById('vf-msgs-main')) return;
     var res = document.getElementById('vf-result');
@@ -3114,6 +3137,177 @@ async function runFindingValidation() {
     if (!window._vfStop) prog.innerHTML = '✅ Selesai: ' + list.length + ' temuan divalidasi' + truncated + '. Lanjut debat / arahkan agent di chat bawah.';
     btn.disabled = false;
     if (stopBtn) stopBtn.style.display = 'none';
+}
+
+function openDartInspectorModal() {
+    fetch('/api/scan/' + SCAN_ID + '/dart-tree')
+        .then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error(t || 'HTTP ' + r.status); });
+            return r.json();
+        })
+        .then(function(tree) {
+            document.getElementById('verify-modal-title').textContent = 'Dart Inspector (blutter)';
+            document.getElementById('verify-modal-target').textContent = 'Target: ' + (globalScanData.package_name || '');
+            document.getElementById('verify-modal-verdict').textContent = tree.packages.length + ' PACKAGE DART';
+            document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-medium';
+            window._dartTree = tree;
+
+            let html = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">';
+            html += '<select id="dart-pkg-select" onchange="loadDartPackage()" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; font-family:var(--font-mono); max-width:220px;">';
+            tree.packages.forEach(function(p) {
+                html += '<option value="' + escHtml(p.package) + '">' + escHtml(p.package) + ' (' + p.functions + ' fn)</option>';
+            });
+            html += '</select>';
+            html += '<input id="dart-fn-search" placeholder="filter function..." oninput="loadDartPackage()" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; font-family:var(--font-mono); width:160px;">';
+            if ((tree.other_flutter_scans || []).length) {
+                html += '<select id="dart-diff-select" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px;">';
+                html += '<option value="">— diff dengan scan... —</option>';
+                tree.other_flutter_scans.forEach(function(o) {
+                    html += '<option value="' + o + '">vs scan #' + o + '</option>';
+                });
+                html += '</select>';
+                html += '<button class="btn btn-sm" onclick="runDartDiff()" style="background:var(--bg-secondary);">Δ Diff</button>';
+            }
+            html += '</div>';
+            html += '<div id="dart-diff-result" style="margin-bottom:10px; display:none;"></div>';
+            html += '<pre id="dart-fn-list" style="background:var(--bg-primary); padding:12px; border-radius:8px; font-family:var(--font-mono); font-size:11px; color:var(--text-primary); max-height:380px; overflow-y:auto; line-height:1.7;">memuat function...</pre>';
+            if ((tree.routes || []).length) {
+                html += '<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">Flutter routes (' + tree.routes.length + '): ' + tree.routes.slice(0, 20).map(escHtml).join(' ') + '</div>';
+            }
+            document.getElementById('verify-modal-content').innerHTML = html;
+            document.getElementById('verify-modal').style.display = 'flex';
+            loadDartPackage();
+        })
+        .catch(function(err) { alert('Dart Inspector: ' + err.message); });
+}
+
+function loadDartPackage() {
+    var pkg = document.getElementById('dart-pkg-select');
+    var q = document.getElementById('dart-fn-search');
+    var list = document.getElementById('dart-fn-list');
+    if (!pkg || !list) return;
+    var url = '/api/scan/' + SCAN_ID + '/dart-package?package=' + encodeURIComponent(pkg.value);
+    if (q && q.value) url += '&q=' + encodeURIComponent(q.value);
+    list.innerText = 'memuat...';
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var html = '';
+            (d.functions || []).forEach(function(f) {
+                var label = (f.cls ? f.cls + '::' : '') + f.method;
+                html += '<span style="color:#a78bfa;">' + escHtml(f.addr) + '</span>  ' + escHtml(label);
+                html += ' <a href="#" onclick="copyDartHookSnippet(\'' + escHtml(f.addr) + '\', \'' + escHtml(label).replace(/'/g, "\\'") + '\'); return false;" style="color:#00f0ff; cursor:pointer;">[🪝 hook]</a>';
+                html += '\n  <span style="color:var(--text-muted);">' + escHtml(f.file) + '</span>\n';
+            });
+            list.innerHTML = html || '(tidak ada function)';
+        });
+}
+
+function copyDartHookSnippet(addr, label) {
+    var snippet = "var base = Module.findBaseAddress('libapp.so');\n" +
+        "Interceptor.attach(base.add(" + addr + "), {\n" +
+        "    onEnter: function () { console.log('[HOOK] " + label + " dipanggil'); }\n" +
+        "});";
+    copyToClipboard(snippet, null);
+    alert('Hook snippet tersalin:\n' + snippet);
+}
+
+function runDartDiff() {
+    var sel = document.getElementById('dart-diff-select');
+    var box = document.getElementById('dart-diff-result');
+    if (!sel || !sel.value || !box) return;
+    fetch('/api/scan/' + SCAN_ID + '/dart-diff?other=' + sel.value)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            box.style.display = 'block';
+            var html = '<div style="border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--bg-secondary); font-size:11px; font-family:var(--font-mono);">';
+            html += '<b>Diff vs scan #' + escHtml(sel.value) + ':</b> a=' + d.total_a + ' fn, b=' + d.total_b + ' fn | ';
+            html += '<span style="color:#22c55e;">+' + d.added.length + ' baru</span> | ';
+            html += '<span style="color:#ff2d55;">-' + d.removed.length + ' hilang</span> | ';
+            html += 'addr berubah: ' + d.addr_changed_count;
+            html += '</div>';
+            if (d.added.length) {
+                html += '<div style="margin-top:6px; font-size:11px; color:#22c55e;">Function baru:<br>' +
+                    d.added.slice(0, 15).map(function(f) { return '+ ' + escHtml((f.cls ? f.cls + '::' : '') + f.method); }).join('<br>') + '</div>';
+            }
+            if (d.removed.length) {
+                html += '<div style="margin-top:6px; font-size:11px; color:#ff2d55;">Function hilang:<br>' +
+                    d.removed.slice(0, 15).map(function(f) { return '- ' + escHtml((f.cls ? f.cls + '::' : '') + f.method); }).join('<br>') + '</div>';
+            }
+            box.innerHTML = html;
+        });
+}
+
+function openRunDeviceModal() {
+    var pkg = globalScanData.package_name || '';
+    let html = '<div style="margin-bottom:12px; font-size:12px; color:var(--text-secondary);">Spawn app di device (adb) + inject script Frida. Butuh: device/AVD terhubung, <code>frida-tools</code> ter-install, frida-server jalan di device.</div>';
+    html += '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">';
+    html += '<input id="run-pkg" value="' + escHtml(pkg) + '" placeholder="package" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; font-family:var(--font-mono); width:220px;">';
+    html += '<select id="run-script-src" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px;">';
+    html += '<option value="frida">RASP Bypass (universal)</option>';
+    html += '<option value="dart">Dart Function Hooks (blutter)</option>';
+    html += '</select>';
+    html += '<button class="btn btn-sm btn-primary" onclick="startFridaRun()">▶ Jalankan</button>';
+    html += '</div>';
+    html += '<pre id="frida-run-output" style="background:var(--bg-primary); padding:12px; border-radius:8px; font-family:var(--font-mono); font-size:11px; color:#38bdf8; max-height:380px; overflow-y:auto; line-height:1.6; white-space:pre-wrap;">menunggu eksekusi...</pre>';
+
+    document.getElementById('verify-modal-title').textContent = 'Frida Runner (device)';
+    document.getElementById('verify-modal-target').textContent = 'Target: ' + pkg;
+    document.getElementById('verify-modal-verdict').textContent = 'RUNTIME';
+    document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-high';
+    document.getElementById('verify-modal-content').innerHTML = html;
+    document.getElementById('verify-modal').style.display = 'flex';
+}
+
+function startFridaRun() {
+    var pkg = (document.getElementById('run-pkg').value || '').trim();
+    var src = document.getElementById('run-script-src').value;
+    var out = document.getElementById('frida-run-output');
+    if (!pkg) { alert('package wajib diisi'); return; }
+    out.innerText = 'mengambil script...';
+    var scriptUrl = src === 'dart' ? '/api/scan/' + SCAN_ID + '/dart-hook-script'
+                                  : '/api/scan/' + SCAN_ID + '/frida-script';
+    fetch(scriptUrl)
+        .then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+            return r.text();
+        })
+        .then(function(script) {
+            return fetch('/api/scan/' + SCAN_ID + '/frida/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ package: pkg, script: script })
+            }).then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); });
+        })
+        .then(function(res) {
+            if (!res.ok) { out.innerText = '❌ ' + (res.j.detail || res.j.error || 'gagal'); return; }
+            window._fridaRunJob = res.j.job_id;
+            window._fridaRunSeen = 0;
+            out.innerText = '🚀 job ' + res.j.job_id + ' berjalan...';
+            pollFridaRun();
+        })
+        .catch(function(err) { out.innerText = '❌ ' + err.message; });
+}
+
+function pollFridaRun() {
+    var out = document.getElementById('frida-run-output');
+    if (!out || !window._fridaRunJob) return;
+    fetch('/api/scan/' + SCAN_ID + '/frida/run/' + window._fridaRunJob)
+        .then(function(r) { return r.json(); })
+        .then(function(st) {
+            var lines = st.lines || [];
+            if (lines.length > window._fridaRunSeen) {
+                out.innerText = lines.join('\n');
+                window._fridaRunSeen = lines.length;
+                out.scrollTop = out.scrollHeight;
+            }
+            if (st.status === 'running') {
+                setTimeout(pollFridaRun, 1500);
+            } else {
+                out.innerText += '\n\n— proses selesai —';
+            }
+        })
+        .catch(function() { setTimeout(pollFridaRun, 2000); });
 }
 
 function openDartHookModal() {

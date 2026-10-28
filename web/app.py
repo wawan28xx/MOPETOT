@@ -35,7 +35,7 @@ from verification import (
     check_aws_sts_identity, check_stripe_key, check_webhook_status, check_credential_login
 )
 
-from poc_engine import PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION, generate_dart_hook_script
+from poc_engine import (PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION, generate_dart_hook_script, dart_packages, dart_package_detail, dart_routes, dart_function_diff, summarize_dart_context, generate_mitm_addon)
 from concurrent.futures import ProcessPoolExecutor
 
 # PoC build jalan di PROCESS pool: CPU-bound berat (walk corpus + regex)
@@ -1583,6 +1583,28 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
                                      "pakai sebagai konteks bila relevan]\n" + "\n".join(summary_lines))[:8000]
                     log("🧾 Ringkasan validasi lintas temuan disertakan: %d entri" % len(summary_lines))
 
+        # Dart context: app Flutter -> ringkasan class/function dari blutter
+        try:
+            bd = _blutter_dir(scan_id)
+            if (bd / "pp.txt").exists() and cfg.get("provider"):
+                pkg_name = dict(scan).get("package_name") or ""
+                if not pkg_name:
+                    # kolom package_name di tabel scans sering kosong — ambil dari meta
+                    try:
+                        meta = (json.loads((RESULTS_DIR / str(scan_id) / "findings.json")
+                                .read_text(encoding="utf-8")).get("meta") or {})
+                        pkg_name = meta.get("package") or ""
+                    except Exception:
+                        pkg_name = ""
+                dart_ctx = await asyncio.to_thread(
+                    summarize_dart_context, bd, pkg_name)
+                if dart_ctx:
+                    agent_message = (agent_message + "\n\n[DART CONTEXT — struktur class "
+                                     "app dari blutter]\n" + dart_ctx)[:12000]
+                    log("🧠 Dart context disertakan (%d chars)" % len(dart_ctx))
+        except Exception as e:
+            log("⚠️ Dart context GAGAL: %s" % e)
+
         await insert_chat_message(db, scan_id, secret_id, "user", message)
         db.close()
 
@@ -1751,6 +1773,222 @@ async def api_get_dart_hook_script(scan_id: int):
         })
     finally:
         await db.close()
+
+
+def _blutter_dir(scan_id) -> Path:
+    return RESULTS_DIR / str(scan_id) / "work" / "corpus" / "flutter_blutter"
+
+
+def _flutter_scans_with_blutter() -> List[int]:
+    out = []
+    try:
+        for d in RESULTS_DIR.iterdir():
+            if not d.name.isdigit():
+                continue
+            if (d / "work" / "corpus" / "flutter_blutter" / "pp.txt").exists():
+                out.append(int(d.name))
+    except OSError:
+        pass
+    return sorted(out)
+
+
+@app.get("/api/scan/{scan_id}/dart-tree")
+async def api_dart_tree(scan_id: int):
+    """Dart Inspector: inventory package + routes + daftar scan Flutter lain."""
+    bd = _blutter_dir(scan_id)
+    if not (bd / "pp.txt").exists():
+        raise HTTPException(404, "Bukan app Flutter atau blutter belum dijalankan "
+                                 "(rescan ulang app ini)")
+    corpus = RESULTS_DIR / str(scan_id) / "work" / "corpus"
+    pkgs = await asyncio.to_thread(dart_packages, bd)
+    routes = await asyncio.to_thread(dart_routes, bd, corpus)
+    return JSONResponse({
+        "packages": pkgs,
+        "routes": routes,
+        "other_flutter_scans": [x for x in _flutter_scans_with_blutter() if x != scan_id],
+    })
+
+
+@app.get("/api/scan/{scan_id}/dart-package")
+async def api_dart_package(scan_id: int, package: str, q: str = ""):
+    """Dart Inspector: daftar function satu package Dart (filter q opsional)."""
+    bd = _blutter_dir(scan_id)
+    if not (bd / "pp.txt").exists():
+        raise HTTPException(404, "blutter belum dijalankan untuk scan ini")
+    detail = await asyncio.to_thread(dart_package_detail, bd, package)
+    if q:
+        ql = q.lower()
+        detail = [d for d in detail if ql in d["method"].lower() or ql in d["cls"].lower()]
+    return JSONResponse({"package": package, "functions": detail[:800],
+                         "total": len(detail)})
+
+
+@app.get("/api/scan/{scan_id}/dart-diff")
+async def api_dart_diff(scan_id: int, other: int):
+    """Diff function Dart dua scan (versi app berbeda)."""
+    bd_a, bd_b = _blutter_dir(scan_id), _blutter_dir(other)
+    if not (bd_a / "pp.txt").exists() or not (bd_b / "pp.txt").exists():
+        raise HTTPException(404, "Salah satu scan tidak punya hasil blutter")
+    result = await asyncio.to_thread(dart_function_diff, bd_a, bd_b)
+    return JSONResponse(result)
+
+
+@app.get("/api/scan/{scan_id}/login-suggestions")
+async def api_login_suggestions(scan_id: int):
+    """Auto-chain: pair kredensial (temuan) + kandidat endpoint login
+    (host dari endpoints + api path auth dari Dart/scan)."""
+    db = await get_db()
+    try:
+        secrets = [dict(x) for x in await get_secrets(db, scan_id)]
+        pairs = []
+        for sec in secrets:
+            if sec.get("rule_id") != "login_credential_pair":
+                continue
+            blob = str(sec.get("context") or "") + "\n" + str(sec.get("match") or "")
+            um = re.search(r'"(username[^"]*)"\s*:\s*"([^"]+)"', blob)
+            pm = re.search(r'"(password[^"]*)"\s*:\s*"([^"]+)"', blob)
+            if um and pm:
+                pairs.append({"username": um.group(2), "password": pm.group(2),
+                              "label": (um.group(1) + " / " + pm.group(1))[:60]})
+        hosts, api_paths = [], []
+        try:
+            data = json.loads((RESULTS_DIR / str(scan_id) / "findings.json")
+                              .read_text(encoding="utf-8"))
+            for h in (data.get("endpoints") or {}).get("hosts", []):
+                if h.get("host"):
+                    hosts.append(h["host"] + ((":" + h["port"]) if h.get("port") else ""))
+            auth_kw = ("login", "session", "auth", "signin", "password", "otp", "token")
+            for f in data.get("findings") or []:
+                if f.get("rule") == "api_path_common":
+                    m = f.get("match") or ""
+                    if any(k in m.lower() for k in auth_kw) and m.startswith("/"):
+                        api_paths.append(m)
+        except Exception:
+            pass
+        return JSONResponse({"pairs": pairs[:10],
+                             "hosts": sorted(set(hosts))[:15],
+                             "api_paths": sorted(set(api_paths))[:25]})
+    finally:
+        await db.close()
+
+
+@app.get("/api/scan/{scan_id}/mitm-addon")
+async def api_mitm_addon(scan_id: int):
+    """Generate mitmproxy addon (tag request yang match surface app)."""
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        pkg = scan["package_name"] or ""
+    finally:
+        await db.close()
+    hosts, api_paths = [], []
+    try:
+        data = json.loads((RESULTS_DIR / str(scan_id) / "findings.json")
+                          .read_text(encoding="utf-8"))
+        for h in (data.get("endpoints") or {}).get("hosts", []):
+            if h.get("host"):
+                hosts.append(h["host"])
+        for f in data.get("findings") or []:
+            if f.get("rule") == "api_path_common" and (f.get("match") or "").startswith("/"):
+                api_paths.append(f["match"])
+    except Exception:
+        pass
+    addon = generate_mitm_addon(pkg, hosts, api_paths)
+    return PlainTextResponse(addon, headers={
+        "Content-Disposition": f'attachment; filename="mopetot_addon_{scan_id}.py"'
+    })
+
+
+# ---------------- Frida Runner (device via adb) ----------------
+FRIDA_JOBS: Dict[str, Dict[str, Any]] = {}
+_FRIDA_LOCK = threading.Lock()
+
+
+def _adb_path() -> str:
+    for cand in (Path(r"C:\platform-tools\adb"), Path("bin/adb.exe")):
+        if cand.exists():
+            return str(cand)
+    return shutil.which("adb") or ""
+
+
+def _frida_job_thread(job_id: str, script_file: str, package: str, frida_cmd: str):
+    import subprocess as _sp
+
+    def _log(line: str):
+        with _FRIDA_LOCK:
+            job = FRIDA_JOBS.get(job_id)
+            if job is not None:
+                job["lines"].append(line[-300:])
+                if len(job["lines"]) > 500:
+                    del job["lines"][:len(job["lines"]) - 500]
+    try:
+        p = _sp.Popen([frida_cmd, "-U", "-f", package, "-l", script_file, "--no-pause"],
+                      stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True,
+                      encoding="utf-8", errors="replace")
+        with _FRIDA_LOCK:
+            FRIDA_JOBS[job_id]["proc"] = p
+        for line in p.stdout:
+            _log(line.rstrip())
+        p.wait(timeout=60)
+    except Exception as e:
+        _log("[!] " + str(e)[:200])
+    finally:
+        with _FRIDA_LOCK:
+            job = FRIDA_JOBS.get(job_id)
+            if job:
+                job["status"] = "done"
+
+
+@app.post("/api/scan/{scan_id}/frida/run")
+async def api_frida_run(scan_id: int, request: Request):
+    """Jalankan script Frida di device (adb): spawn app + inject + stream output."""
+    data = await request.json()
+    package = (data.get("package") or "").strip()
+    script = data.get("script") or ""
+    if not package or not script:
+        raise HTTPException(400, "package dan script wajib diisi")
+    adb = _adb_path()
+    if not adb:
+        raise HTTPException(400, "ADB tidak ditemukan (install platform-tools)")
+    frida_cmd = shutil.which("frida") or ""
+    if not frida_cmd:
+        raise HTTPException(400, "CLI frida tidak ditemukan (pip install frida-tools)")
+    import subprocess as _sp
+    try:
+        out = _sp.run([adb, "devices"], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        raise HTTPException(400, f"adb devices gagal: {e}")
+    devices = [l for l in (out.stdout or "").splitlines()
+               if l.strip() and not l.startswith("List") and "device" in l
+               and "offline" not in l]
+    if not devices:
+        raise HTTPException(400, "Tidak ada device/AVD terhubung ke ADB. "
+                                 "Hubungkan device (USB debugging) atau jalankan AVD dulu.")
+    import tempfile as _tf
+    sf = Path(_tf.mktemp(suffix=".js"))
+    sf.write_text(script, encoding="utf-8")
+    job_id = uuid.uuid4().hex[:12]
+    with _FRIDA_LOCK:
+        FRIDA_JOBS[job_id] = {"status": "running", "lines": [], "proc": None,
+                              "script_file": str(sf), "package": package}
+    threading.Thread(target=_frida_job_thread,
+                     args=(job_id, str(sf), package, frida_cmd), daemon=True).start()
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/scan/{scan_id}/frida/run/{job_id}")
+async def api_frida_run_status(scan_id: int, job_id: str):
+    with _FRIDA_LOCK:
+        job = FRIDA_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(404, "job tidak ditemukan")
+        proc = job.get("proc")
+        status = job["status"]
+        if status == "running" and proc is not None and proc.poll() is not None:
+            status = "done"
+        return JSONResponse({"status": status, "lines": list(job["lines"])})
 
 
 @app.get("/api/scan/{scan_id}/hosts")
