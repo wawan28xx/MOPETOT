@@ -1601,7 +1601,7 @@ function loadLiveVerifier() {
             window._verifyRowLookup[buildVerifyLookupKey('google-api', keyStr)] = rowId;
             html += '<tr>';
             html += '<td><span class="hardcoded-highlight">' + escHtml(keyStr) + '</span></td>';
-            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyGoogleKey(' + idx + ')">🔑 Check 10 Scopes</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;google&#39;, ' + idx + ')">🤖</button></td>';
+            html += '<td><button class="btn-verify" id="btn_' + rowId + '" onclick="triggerVerifyGoogleKey(' + idx + ')">🔑 Check 24 Scopes</button> <button class="btn-verify" style="margin-left:4px;" title="Validate with Agent (AI)" onclick="triggerValidateAgent(&#39;google&#39;, ' + idx + ')">🤖</button></td>';
             html += '<td id="res_' + rowId + '"><span style="color:var(--text-muted);">Menunggu pengujian...</span></td>';
             html += '</tr>';
         });
@@ -3936,7 +3936,7 @@ function verifyGoogleKey(key, rowId) {
     const btn = document.getElementById('btn_' + rowId);
     const resEl = document.getElementById('res_' + rowId);
     btn.classList.add('btn-testing');
-    btn.innerText = '⏳ Testing 10 Scopes...';
+    btn.innerText = '⏳ Testing 24 Scopes...';
 
     fetch('/api/scan/' + SCAN_ID + '/verify/google-api', {
         method: 'POST',
