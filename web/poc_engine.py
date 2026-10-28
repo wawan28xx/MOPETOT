@@ -1768,10 +1768,13 @@ def _ios_load_targets(corpus_dir: Path) -> List[Dict[str, Any]]:
         except Exception:
             continue
         binary = data.get("binary") or jf.name.replace("_classes.json", "")
+        encrypted = bool(data.get("encrypted"))
+        anon = 0
         for c in data.get("classes") or []:
             name = c.get("name")
             if not name:
-                continue
+                anon += 1
+                name = "<class-anon-%d>" % anon
             targets.append({
                 "binary": binary, "class": name,
                 "super": c.get("super") or "", "swift": bool(c.get("swift")),
@@ -1779,7 +1782,10 @@ def _ios_load_targets(corpus_dir: Path) -> List[Dict[str, Any]]:
                             for m in (c.get("methods") or [])],
                 "class_methods": [m[0] if isinstance(m, (list, tuple)) else m
                                   for m in (c.get("class_methods") or [])],
-                "source": "runtime-dump",
+                "method_count": int(c.get("method_count") or 0),
+                "ivar_count": int(c.get("ivar_count") or 0),
+                "names_encrypted": bool(c.get("names_encrypted")),
+                "source": "partial-fairplay" if encrypted else "runtime-dump",
             })
         for cat in data.get("categories") or []:
             cname = cat.get("class")
@@ -1833,6 +1839,21 @@ def _ios_load_targets(corpus_dir: Path) -> List[Dict[str, Any]]:
     return targets
 
 
+def _ios_encryption_info(corpus_dir: Path) -> Dict[str, Any]:
+    """Ringkasan FairPlay dari corpus/ios_crypto.json (jika ada)."""
+    try:
+        d = json.loads((corpus_dir / "ios_crypto.json")
+                       .read_text(encoding="utf-8", errors="replace"))
+        bins = d.get("binaries") or []
+        return {
+            "any_encrypted": bool(d.get("any_encrypted")),
+            "encrypted": [b.get("file") for b in bins if b.get("encrypted")],
+            "total": len(bins),
+        }
+    except Exception:
+        return {"any_encrypted": False, "encrypted": [], "total": 0}
+
+
 def ios_inspect(corpus_dir: Path, query: str = "", limit: int = 300) -> Dict[str, Any]:
     """iOS Inspector: inventory class/method dari class-dump (filter query opsional)."""
     targets = _ios_load_targets(corpus_dir)
@@ -1852,6 +1873,9 @@ def ios_inspect(corpus_dir: Path, query: str = "", limit: int = 300) -> Dict[str
             "swift": t.get("swift", False), "source": t.get("source", ""),
             "methods": (t.get("methods") or [])[:80],
             "class_methods": (t.get("class_methods") or [])[:40],
+            "method_count": t.get("method_count", 0),
+            "ivar_count": t.get("ivar_count", 0),
+            "names_encrypted": bool(t.get("names_encrypted")),
         })
     stats = {
         "binaries": len(bins),
@@ -1859,7 +1883,8 @@ def ios_inspect(corpus_dir: Path, query: str = "", limit: int = 300) -> Dict[str
         "methods": sum(len(c["methods"]) + len(c["class_methods"])
                        for b in bins.values() for c in b["classes"]),
     }
-    return {"bins": list(bins.values()), "stats": stats, "truncated": shown >= limit}
+    return {"bins": list(bins.values()), "stats": stats, "truncated": shown >= limit,
+            "encryption": _ios_encryption_info(corpus_dir)}
 
 
 def _ios_selector_name(sel: str) -> str:

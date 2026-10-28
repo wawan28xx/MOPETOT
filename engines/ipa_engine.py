@@ -41,20 +41,53 @@ def extract_objc_swift_symbols(macho_path: Path, corpus: Path):
         r = dump_binary(macho_path)
         if r.get("ok"):
             swift_syms = _swift_symbols_lief(macho_path, swift_demangle_partial)
+            recovered = 0
+            if r.get("partial"):
+                # FairPlay partial: symbol table di __LINKEDIT tetap plaintext —
+                # framework pihak-3 sering keep `-[Class sel:]` debug symbols.
+                # Merge nama selector hasilnya ke inventory class.
+                sym_methods = _lief_objc_methods(macho_path)
+                for c in r.get("classes") or []:
+                    sm = sym_methods.get(c.get("name") or "")
+                    if not sm:
+                        continue
+                    c["methods"] = sorted(set(sm["m"]))[:200]
+                    c["class_methods"] = sorted(set(sm["cm"]))[:100]
+                    if c["methods"] or c["class_methods"]:
+                        recovered += 1
+                r["stats"]["methods"] = sum(
+                    len(c.get("methods") or []) + len(c.get("class_methods") or [])
+                    for c in r.get("classes") or []) or r["stats"].get("methods", 0)
+                if recovered:
+                    r["recovered_classes"] = recovered
             lines = list(banner)
             lines.append(f"// arch: {r['arch']} | classes: {r['stats']['classes']} | "
                          f"methods: {r['stats']['methods']} | categories: {r['stats']['categories']}")
             lines += ["", r["header"]]
+            if r.get("partial"):
+                rec = [c for c in (r.get("classes") or [])
+                       if (c.get("methods") or c.get("class_methods"))]
+                if rec:
+                    lines += ["", "// --- Methods recovered dari symbol table (plaintext __LINKEDIT) ---"]
+                    for c in rec[:400]:
+                        for sel in (c.get("class_methods") or [])[:40]:
+                            lines.append(f"+ ({c['name']}) {sel};")
+                        for sel in (c.get("methods") or [])[:80]:
+                            lines.append(f"- ({c['name']}) {sel};")
             if swift_syms:
                 lines += ["", "// --- Swift symbols (demangled parsial) ---", *swift_syms]
             out_file.write_text("\n".join(lines), encoding="utf-8", errors="replace")
             # struktur JSON untuk Hook Generator / iOS Inspector
             (out_dir / f"{macho_path.name}_classes.json").write_text(
                 json.dumps({"binary": macho_path.name, "arch": r["arch"], "stats": r["stats"],
+                            "partial": bool(r.get("partial")), "encrypted": bool(r.get("encrypted")),
                             "classes": r["classes"], "categories": r["categories"]},
                            indent=1, ensure_ascii=False),
                 encoding="utf-8", errors="replace")
-            log(f"iOS Class-Dump (runtime parser): {macho_path.name} -> "
+            mode = "PARTIAL FairPlay" if r.get("partial") else "runtime parser"
+            if r.get("recovered_classes"):
+                mode += f" +{r['recovered_classes']} class via symtab"
+            log(f"iOS Class-Dump ({mode}): {macho_path.name} -> "
                 f"{r['stats']['classes']} classes / {r['stats']['methods']} methods", "ok")
             return
         dump_note = r.get("error")
@@ -105,6 +138,35 @@ def extract_objc_swift_symbols(macho_path: Path, corpus: Path):
         out_file.write_text("\n".join(content), encoding="utf-8", errors="replace")
         log(f"iOS Class-Dump (fallback symbols): {macho_path.name} "
             f"({len(classes_found)} classes, {len(methods_found)} methods, {len(swift_found)} swift)", "ok")
+
+
+def _lief_objc_methods(macho_path: Path) -> dict:
+    """Symbol ObjC dari symtab (linkedit tidak ikut terenkripsi FairPlay).
+
+    Framework pihak-3 (Realm, Alamofire, dll.) biasanya keep symbol debug
+    `-[Class selector:]` -> bisa dipakai untuk isi nama method yang di partial
+    dump milik binary FairPlay-encrypted.
+    Return {class: {"m": [selector...], "cm": [selector...]}}.
+    """
+    out = {}
+    try:
+        import lief
+        b = lief.parse(str(macho_path))
+        if not b:
+            return out
+        for s in b.symbols:
+            nm = s.name or ""
+            if not (nm.startswith("-[") or nm.startswith("+[")) or not nm.endswith("]"):
+                continue
+            inner = nm[2:-1]
+            if " " not in inner:
+                continue
+            cls, sel = inner.split(" ", 1)
+            entry = out.setdefault(cls, {"m": [], "cm": []})
+            (entry["cm"] if nm.startswith("+[") else entry["m"]).append(sel)
+    except Exception:
+        pass
+    return out
 
 
 def _swift_symbols_lief(macho_path: Path, demangler) -> list:

@@ -51,6 +51,7 @@ class MachOImage:
         self.arch = arch
         self.sections = {}   # (segname, sectname) -> (vmaddr, size, fileoff)
         self.encrypted = False
+        self.crypt_range = None  # (file_lo, file_hi) range FairPlay
         self.parse()
 
     # ---------- primitives ----------
@@ -81,6 +82,9 @@ class MachOImage:
     def cstr(self, addr, maxlen=600):
         off = self.fo(addr)
         if off is None:
+            return None
+        # string di dalam range FairPlay = ciphertext, jangan kembalikan garbage
+        if self.crypt_range and self.crypt_range[0] <= off < self.crypt_range[1]:
             return None
         end = self.data.find(b"\x00", off, off + maxlen)
         if end == -1:
@@ -127,11 +131,104 @@ class MachOImage:
                     cryptoff, cryptsize, cryptid = struct.unpack_from("<III", data, cursor + 8)
                     if cryptid:
                         self.encrypted = True
+                        self.crypt_range = (cryptoff, cryptoff + cryptsize)
             cursor += cmdsize
             if cmdsize == 0:
                 break
 
     # ---------- ObjC runtime parsing ----------
+    # ---------- symtab (tidak ikut terenkripsi FairPlay) ----------
+    def symtab_objc_classes(self):
+        """Parse LC_SYMTAB -> {vmaddr: ClassName} untuk simbol _OBJC_CLASS_$_X."""
+        out = {}
+        cur = self.base + 32
+        ncmds = _read_u32(self.data, self.base + 16)
+        stroff = strsize = symoff = nsyms = None
+        for _ in range(ncmds):
+            if cur + 8 > len(self.data):
+                break
+            cmd, cmdsize = struct.unpack_from("<II", self.data, cur)
+            if cmd == 0x2:  # LC_SYMTAB
+                symoff, nsyms, stroff, strsize = struct.unpack_from("<IIII", self.data, cur + 8)
+                break
+            cur += cmdsize
+            if cmdsize == 0:
+                break
+        if not nsyms:
+            return out
+        for i in range(min(nsyms, 300000)):
+            eo = self.base + symoff + i * 16
+            if eo + 16 > len(self.data):
+                break
+            strx, typ = struct.unpack_from("<IB", self.data, eo)
+            value, = struct.unpack_from("<Q", self.data, eo + 8)
+            if (typ & 0x3e) == 0x0e or (typ & 0x3e) == 0x0f:  # N_SECT | N_EXT
+                so = self.base + stroff + strx
+                if so >= len(self.data):
+                    continue
+                name_end = self.data.find(b"\x00", so, so + 300)
+                if name_end == -1:
+                    continue
+                try:
+                    name = self.data[so:name_end].decode("utf-8", "replace")
+                except Exception:
+                    continue
+                if name.startswith("_OBJC_CLASS_$_") and value:
+                    out[value] = name[len("_OBJC_CLASS_$_"):]
+        return out
+
+    # ---------- partial dump untuk binary FairPlay-encrypted ----------
+    def partial_classlist(self, sym_names):
+        """Classlist + nama dari symtab + jumlah method/ivar/prop dari __objc_const.
+
+        Range FairPlay hanya menutup __TEXT (termasuk __objc_methname/__objc_classname),
+        sedangkan __objc_classlist/__objc_const/__objc_data tetap plaintext —
+        struktur masih bisa dihitung meski nama selector terenkripsi.
+        """
+        classes = []
+        for cls in self._section_addrs("__objc_classlist"):
+            name = sym_names.get(cls)
+            bits = self.u64(cls + 0x20)
+            if bits is None:
+                continue
+            ro = bits & FAST_DATA_MASK
+            if not ro:
+                continue
+            entry = {"name": name, "super": "", "swift": False,
+                     "methods": [], "class_methods": [], "ivars": [], "props": [],
+                     "protocols": [], "meta": False,
+                     "names_encrypted": True, "method_count": 0,
+                     "ivar_count": 0, "prop_count": 0}
+            # hitung method/ivar/prop dari header list (plaintext di __objc_const)
+            ml = self.ptr(ro + 32)
+            if ml:
+                first = self.u64(ml)
+                if first is not None:
+                    entry["method_count"] = min(first >> 32, 100000)
+            il = self.ptr(ro + 48)
+            if il:
+                first = self.u64(il)
+                if first is not None:
+                    entry["ivar_count"] = min(first >> 32, 100000)
+            pl = self.ptr(ro + 64)
+            if pl:
+                first = self.u64(pl)
+                if first is not None:
+                    entry["prop_count"] = min(first >> 32, 100000)
+            isa = self.ptr(cls)
+            if isa and isa != cls:
+                mbits = self.u64(isa + 0x20)
+                if mbits is not None:
+                    mro = mbits & FAST_DATA_MASK
+                    if mro:
+                        mml = self.ptr(mro + 32)
+                        if mml:
+                            mf = self.u64(mml)
+                            if mf is not None:
+                                entry["method_count"] += min(mf >> 32, 100000)
+            classes.append(entry)
+        return classes
+
     def _section_addrs(self, sectname):
         out = []
         for (seg, sect), (addr, size, _off) in self.sections.items():
@@ -378,6 +475,19 @@ def _nm_sanitize(n):
     return n.strip().replace(" ", "_")
 
 
+def _render_partial_header(classes):
+    """Render inventory untuk binary FairPlay-encrypted (nama selector tak tersedia)."""
+    lines = ["// NOTE: FairPlay ENCRYPTED — nama selector terenkripsi.",
+             "//       Kolom di bawah = nama class (symtab) + jumlah method/ivar/prop",
+             "//       hasil parse struktur runtime di __objc_const (plaintext)."]
+    for c in sorted(classes, key=lambda x: -(x["method_count"])):
+        nm = c["name"] or f"<class@{c.get('addr', '?')}>"
+        lines.append(f"@interface {nm}  // methods: {c['method_count']} "
+                     f"(terenkripsi), ivars: {c['ivar_count']}, props: {c['prop_count']}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ---------------- Swift demangling pragmatis ----------------
 
 def swift_demangle_partial(sym: str):
@@ -473,8 +583,28 @@ def dump_binary(macho_path: Path):
     except (ValueError, struct.error) as e:
         return {"ok": False, "error": f"parse macho: {e}", "arch": arch}
     if img.encrypted:
+        # FairPlay: nama selector/class terenkripsi, tapi symtab + struktur
+        # __objc_classlist/__objc_const tetap plaintext -> partial dump
+        try:
+            sym_names = img.symtab_objc_classes()
+            classes = img.partial_classlist(sym_names)
+        except struct.error:
+            classes = []
+        named = [c for c in classes if c["name"]]
+        stats = {"classes": len(classes),
+                 "methods": sum(c["method_count"] for c in classes),
+                 "categories": 0, "ivars": sum(c["ivar_count"] for c in classes)}
+        if classes:
+            header = _render_partial_header(classes)
+            return {"ok": True, "partial": True, "encrypted": True, "arch": img.arch,
+                    "header": header, "stats": stats, "classes": classes,
+                    "categories": [],
+                    "note": "FairPlay/cryptid ENCRYPTED — nama selector terenkripsi; "
+                            "inventory class + jumlah method dari symtab+__objc_const. "
+                            "Untuk nama method penuh: dump binary dari device jailbroken."}
         return {"ok": False, "encrypted": True, "arch": img.arch,
-                "error": "FairPlay/cryptid encrypted — class-dump butuh binary ter-dekripsi dari device"}
+                "error": "FairPlay/cryptid encrypted — tidak ada classlist yang bisa diparse; "
+                         "butuh binary ter-dekripsi dari device jailbroken"}
     if not img.sections:
         return {"ok": False, "error": "tidak ada section", "arch": img.arch}
     try:

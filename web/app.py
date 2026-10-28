@@ -832,6 +832,62 @@ async def start_scan(scan_id: int):
     finally:
         await db.close()
 
+@app.post("/api/scan/{scan_id}/rescan")
+async def rescan_scan(scan_id: int):
+    """Rescan in-place: pakai file upload asli, hasil lama dibuang, scan row tetap #id."""
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        if scan["status"] in ("running", "queued"):
+            raise HTTPException(409, f"Scan sedang {scan['status']} — tunggu selesai")
+
+        file_path = scan["file_path"]
+        if not file_path or not Path(file_path).exists():
+            # fallback: path asli tersimpan di findings.json meta.target
+            try:
+                meta = json.loads((RESULTS_DIR / str(scan_id) / "findings.json")
+                                  .read_text(encoding="utf-8")).get("meta") or {}
+                cand = meta.get("target")
+                if cand and Path(cand).exists():
+                    file_path = cand
+                    await db.execute("UPDATE scans SET file_path=? WHERE id=?",
+                                     (cand, scan_id))
+            except Exception:
+                pass
+        if not file_path or not Path(file_path).exists():
+            raise HTTPException(404, "File upload asli tidak ditemukan di server — upload ulang file-nya")
+
+        # buang hasil analisis lama (findings/secrets/endpoints/manifest/logs/cache)
+        for tbl in ("findings", "endpoints", "secrets", "manifest_info",
+                    "scan_logs", "verification_cache", "poc_cache"):
+            try:
+                await db.execute(f"DELETE FROM {tbl} WHERE scan_id=?", (scan_id,))
+            except Exception:
+                pass
+        # reset row ke pending (request_scan butuh status pending)
+        await db.execute(
+            "UPDATE scans SET status='pending', progress=0, phase=NULL, error=NULL, "
+            "started_at=NULL, completed_at=NULL WHERE id=?", (scan_id,))
+        await db.commit()
+
+        # corpus & findings.json lama dibuang biar hasil fresh (diregenerasi saat scan)
+        rd = RESULTS_DIR / str(scan_id)
+        if rd.exists():
+            shutil.rmtree(rd, ignore_errors=True)
+
+        if not await request_scan(db, scan_id):
+            raise HTTPException(409, "Gagal mengantri scan")
+        if QUEUE_WAKEUP:
+            QUEUE_WAKEUP.set()
+        await insert_log(db, scan_id, "info", f"RESCAN: {file_path}")
+        return JSONResponse({"status": "queued", "scan_id": scan_id,
+                             "message": "Scan lama dibersihkan, rescan masuk antrian"})
+    finally:
+        await db.close()
+
+
 @app.get("/scan/{scan_id}")
 async def scan_page(request: Request, scan_id: int):
     db = await get_db()
