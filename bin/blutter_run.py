@@ -39,6 +39,7 @@ def build_env():
     paths = [
         str(BLUTTER_SRC / "bin"),                          # blutter exe + DLL runtime
         str(BLUTTER_SRC / "external" / "icu-windows" / "bin64"),
+        str(BLUTTER_SRC / "external" / "capstone"),       # capstone.dll runtime
         CMAKE_BIN, NINJA_DIR,
     ]
     env["PATH"] = ";".join(paths) + ";" + env.get("PATH", "")
