@@ -45,3 +45,14 @@ llm_settings.json
 bin/blutter_src/dartsdk/
 bin/blutter_src/build/
 bin/blutter_src/bin/
+
+# Runtime SDK berat (lokal saja — >100MB, tidak layak push GitHub)
+bin/dotnet-sdk/
+bin/ghidra*/
+bin/vcpkg/
+
+# SQLite DB runtime di root web/ (data klien — jangan push)
+web/*.db
+web/*.db-journal
+web/*.db-wal
+web/*.db-shm
