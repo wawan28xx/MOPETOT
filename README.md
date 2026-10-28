@@ -12,6 +12,7 @@ mobile serta binary terkait. Proyek ini menyediakan dua entry point:
 - **Multi-format**: APK, AAB, XAPK/APKS/APKM, IPA, JAR, DEX/SMALI, SO, DLL/EXE (.NET via ilspycmd), HBC (Hermes), ZIP, dan direktori hasil ekstraksi.
 - **Pipeline empat tahap**: Identify → Unpack → Scan → Report.
 - **Secret scanning** berbasis regex dari `rules/secrets.json` (rule PEM mensyaratkan body base64 — header tanpa isi tidak dilaporkan). Rule endpoint memakai filter host 3rd-party/dokumentasi + dedupe global (973 noise → 10 endpoint bermakna pada uji APK nyata).
+- **Flutter (blutter)**: app Flutter otomatis di-dump via **blutter** (Dart AOT analyzer) — class/function/offset Dart lengkap (`pp.txt`, `objs.txt`, `asm/` per package, `blutter_frida.js` siap pakai). DartVM di-build lokal sekali per versi Dart (cache `bin/blutter_src/build/`); ICU 76 + Capstone 5 sudah di-vendor di `bin/blutter_src/external/`. Jika versi Dart belum didukung/build gagal → otomatis fallback ke Dart string extraction. Fast mode `--skip-blutter` tetap tersedia.
 - **iOS**: deteksi binary terenkripsi FairPlay (`cryptid`) — hasil strings/symbol pada binary terenkripsi ditandai sebagai partial.
 - **Code Explorer**: browser corpus hasil decompile ala VS Code (syntax highlighting, grep ripgrep, find-in-file ala jadx-gui).
 - **Verification Assistant**: AI chatbox via vibe CLI lokal — nilai secret dikirim **utuh (tanpa masking)** untuk membantu validasi manual pentester pada audit berizin.

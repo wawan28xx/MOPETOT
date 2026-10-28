@@ -40,3 +40,8 @@ web/.env
 # Local scratch/frida scripts (user-local, jangan di-push)
 tmp/
 llm_settings.json
+
+# blutter: artefak auto-rebuild (SDK dart di-fetch otomatis per versi)
+bin/blutter_src/dartsdk/
+bin/blutter_src/build/
+bin/blutter_src/bin/

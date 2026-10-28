@@ -1,5 +1,6 @@
 """Flutter: libapp.so — coba blutter, fallback deep dart string extraction + symbols."""
 import re
+import sys
 from pathlib import Path
 
 from .common import run as run_cmd, find_tool, log, extract_strings_basic
@@ -58,19 +59,21 @@ def run(libapp: Path, root: Path, corpus: Path, opts: dict):
 
     if skip_blutter:
         log("Fast mode: blutter di-skip (Dart string extraction saja)", "warn")
-    elif blutter:
+    elif blutter and libapp.parent.name != "armeabi-v7a":
+        # blutter hanya untuk arm64/x64; CLI: blutter_run.py <lib_dir> <outdir>
         outdir = corpus / "flutter_blutter"
         outdir.mkdir(parents=True, exist_ok=True)
-        cmd = [str(blutter), str(libapp)]
-        if flutter_so:
-            cmd.append(str(flutter_so))
-        cmd.append(str(outdir))
-        log(f"[>] blutter: {libapp.name} -> Dart symbols (live progress di bawah)")
-        rc, out, err = run_cmd(cmd, timeout=900, stream=True)
-        if rc == 0:
-            log(f"blutter: {libapp.name} -> Dart symbols", "ok")
+        cmd = [sys.executable, str(blutter), str(libapp.parent), str(outdir)]
+        log(f"[>] blutter: {libapp.parent.name}/libapp.so -> Dart class dump "
+            f"(build DartVM pertama kali per versi bisa lama)")
+        # timeout besar: build pertama DartVM ~5-10 menit; analisis ~40 detik
+        rc, out, err = run_cmd(cmd, timeout=3600, stream=True)
+        if rc == 0 and (outdir / "pp.txt").exists():
+            log(f"blutter: Dart class dump -> {outdir} (pp.txt, objs.txt, asm/, blutter_frida.js)", "ok")
             return
-        log(f"blutter gagal ({err[:100]}), fallback strings", "warn")
+        log(f"blutter gagal ({(err or '')[:100]}), fallback strings", "warn")
+    elif blutter:
+        log("blutter dilewati untuk armeabi-v7a (arm64/x64 saja), fallback strings", "warn")
     else:
         log("blutter binary tidak ditemukan di bin/. Menggunakan Deep Dart String & Route Extractor...", "info")
 

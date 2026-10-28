@@ -33,7 +33,7 @@ _TOOL_CANDIDATES = {
     "ilspycmd": lambda: _first(BIN / "dotnet-tools" / "ilspycmd.exe", BIN / "dotnet-tools" / "ilspycmd"),
     "il2cppdumper": lambda: _first(BIN / "il2cppdumper" / "Il2CppDumper.exe", BIN / "il2cppdumper" / "Il2CppDumper"),
     "dotnet": lambda: _first(BIN / "dotnet-sdk" / "dotnet.exe", BIN / "dotnet-sdk" / "dotnet"),
-    "blutter": lambda: _first(BIN / "blutter" / "blutter.exe", BIN / "blutter" / "blutter"),
+    "blutter": lambda: _first(BIN / "blutter_run.py"),  # wrapper MOPETOT: env MSVC + blutter.py
     "adb": lambda: _first(BIN / "adb.exe", shutil.which("adb")),
     "frida": lambda: _first(shutil.which("frida")),
     "objection": lambda: _first(shutil.which("objection")),
