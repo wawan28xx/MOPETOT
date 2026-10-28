@@ -35,7 +35,7 @@ from verification import (
     check_aws_sts_identity, check_stripe_key, check_webhook_status, check_credential_login
 )
 
-from poc_engine import PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION
+from poc_engine import PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION, generate_dart_hook_script
 from concurrent.futures import ProcessPoolExecutor
 
 # PoC build jalan di PROCESS pool: CPU-bound berat (walk corpus + regex)
@@ -1722,6 +1722,32 @@ async def api_get_frida_script(scan_id: int):
         
         return PlainTextResponse(frida_code, headers={
             "Content-Disposition": f'attachment; filename="bypass_hooks_{scan_id}.js"'
+        })
+    finally:
+        await db.close()
+
+
+@app.get("/api/scan/{scan_id}/dart-hook-script")
+async def api_get_dart_hook_script(scan_id: int):
+    """Generate Frida script hook presisi dari hasil blutter (function Dart
+    menarik: login/auth/token/crypto) untuk app Flutter."""
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        manifest = await get_manifest(db, scan_id)
+        pkg = (manifest and manifest["package_name"]) or scan["package_name"] or ""
+        blutter_dir = RESULTS_DIR / str(scan_id) / "work" / "corpus" / "flutter_blutter"
+        if not (blutter_dir / "blutter_frida.js").exists():
+            raise HTTPException(404, "Bukan app Flutter atau blutter belum dijalankan "
+                                     "(rescan ulang app ini untuk mendapat Dart class dump)")
+        try:
+            script = await asyncio.to_thread(generate_dart_hook_script, blutter_dir, pkg)
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        return PlainTextResponse(script, headers={
+            "Content-Disposition": f'attachment; filename="dart_hooks_{scan_id}.js"'
         })
     finally:
         await db.close()

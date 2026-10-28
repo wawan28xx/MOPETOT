@@ -115,6 +115,11 @@ def unpack_ipa(target: Path, workdir: Path, opts: dict):
         extract_objc_swift_symbols(main_bin, corpus)
         log(f"Mach-O utama: {main_bin.name}", "ok")
 
+    # Flutter iOS: Dart AOT snapshot di Frameworks/App.framework/App
+    if (app_dir / "Frameworks" / "App.framework" / "App").exists():
+        from . import flutter_engine
+        flutter_engine.run_ios(app_dir, workdir, corpus, opts)
+
     # Semua biner Mach-O lain (dylib, framework biner, executable tools)
     macho_glob = list(app_dir.rglob("*.dylib")) + [p for p in app_dir.rglob("*") if p.is_file() and _is_macho(p)]
     seen = {main_bin} if main_bin else set()

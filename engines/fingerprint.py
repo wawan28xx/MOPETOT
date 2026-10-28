@@ -83,6 +83,10 @@ def detect_framework(unpacked_dir: Path, container_type=None):
         p.name.lower().startswith("libflutter") for p in paths
     ):
         markers["flutter"] = FRAMEWORK_NAMES["flutter"]
+    # Flutter iOS: Frameworks/App.framework + Flutter.framework
+    dirnames = {p.name.lower() for p in paths if p.is_dir()}
+    if "app.framework" in dirnames and "flutter.framework" in dirnames:
+        markers["flutter"] = FRAMEWORK_NAMES["flutter"] + " (iOS)"
     # Unity IL2CPP
     il2cpp = any(p.name.lower() == "libil2cpp.so" for p in paths)
     metadata = any(p.name.lower() == "global-metadata.dat" for p in paths)

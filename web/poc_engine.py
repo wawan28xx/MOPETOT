@@ -1369,3 +1369,125 @@ def build_pocs_payload(scan_obj: dict, manifest_obj: dict, corpus_dir: Path,
         "poc_version": POC_PAYLOAD_VERSION,
         "total_pocs": len(component_pocs) + len(deeplink_pocs) + len(secret_pocs),
     }
+
+
+# ======================================================================
+# DART HOOK GENERATOR (dari hasil blutter: asm/ per package)
+# Auto-generate Frida hook presisi untuk function Dart yang menarik
+# (login/auth/token/crypto/credential) pada package app sendiri.
+# ======================================================================
+
+_DART_INTERESTING = re.compile(
+    r"(?i)\b(login|signin|sign_in|signup|auth|token|password|credential|"
+    r"encrypt|decrypt|sign|secret|api_?key|verify_?otp|otp|refresh|"
+    r"interceptor|session|pin|passcode|biometric)\b")
+_DART_METHOD_LINE = re.compile(r"^\s*_?\s*([A-Za-z_$][\w$<>]*)\s*\(")
+_DART_ADDR_LINE = re.compile(r"//\s*\*\*\s*addr:\s*(0x[0-9a-f]+)")
+# package ekosistem yang hampir pasti bukan business logic app
+_DART_LIB_PKGS_PREFIX = ("flutter", "dart", "_flutterfire", "firebase_", "plugin")
+
+
+def _parse_dart_functions(asm_dir: Path):
+    """Parse asm/<pkg>/...: hasil [(pkg, class, method, addr)] menarik."""
+    out = []
+    if not asm_dir.exists():
+        return out
+    for pkg_dir in sorted(asm_dir.iterdir()):
+        if not pkg_dir.is_dir():
+            continue
+        pkg = pkg_dir.name
+        for f in pkg_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            try:
+                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            cls = ""
+            last_method = ""
+            for line in lines:
+                m = re.match(r"^class\s+([\w$]+)", line)
+                if m:
+                    cls = m.group(1)
+                    continue
+                mm = _DART_METHOD_LINE.match(line)
+                if mm and not line.strip().startswith("//"):
+                    last_method = mm.group(1)
+                    continue
+                ma = _DART_ADDR_LINE.search(line)
+                if ma and last_method:
+                    if _DART_INTERESTING.search(last_method) or _DART_INTERESTING.search(cls):
+                        out.append((pkg, cls, last_method, ma.group(1)))
+                    last_method = ""
+    return out
+
+
+def generate_dart_hook_script(blutter_dir: Path, app_package: str,
+                              max_hooks: int = 15) -> str:
+    """Generate Frida script dengan hook presisi dari hasil blutter.
+
+    Template dasar = blutter_frida.js (helper object dumper dari blutter);
+    body onLibappLoaded diganti hook per function Dart yang menarik.
+    """
+    frida_tpl = blutter_dir / "blutter_frida.js"
+    if not frida_tpl.exists():
+        raise FileNotFoundError("blutter_frida.js tidak ada — jalankan blutter dulu")
+    tpl = frida_tpl.read_text(encoding="utf-8", errors="replace")
+
+    funcs = _parse_dart_functions(blutter_dir / "asm")
+    app_pkg = (app_package or "").split(".")[-1].lower()
+    # prioritas: package app sendiri; sisanya non-library
+    own = [f for f in funcs if f[0].lower() == app_pkg]
+    others = [f for f in funcs
+              if not any(f[0].lower().startswith(p) for p in _DART_LIB_PKGS_PREFIX)]
+    selected = own if own else others
+    # dedupe (class, method) — overloading sama cukup satu hook
+    seen = set()
+    uniq = []
+    for f in selected:
+        key = (f[1], f[2])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(f)
+    uniq = uniq[:max_hooks]
+
+    hook_blocks = []
+    for pkg, cls, method, addr in uniq:
+        label = (cls + "::" if cls else "") + method
+        hook_blocks.append(
+            f"    // [{pkg}] {label}\n"
+            f"    Interceptor.attach(libapp.add({addr}), {{\n"
+            f"        onEnter: function () {{\n"
+            f"            init(this.context);\n"
+            f"            console.log('[DART-HOOK] {label} dipanggil');\n"
+            f"            for (var ai = 0; ai < 4; ai++) {{\n"
+            f"                try {{\n"
+            f"                    let objPtr = getArg(this.context, ai);\n"
+            f"                    const [tptr, c2, values] = getTaggedObjectValue(objPtr);\n"
+            f"                    console.log(`  arg${{ai}} ${{c2.name}}@${{tptr.toString().slice(2)}} =`, JSON.stringify(values, null, 1));\n"
+            f"                }} catch (e) {{}}\n"
+            f"            }}\n"
+            f"        }}\n"
+            f"    }});\n")
+    if not hook_blocks:
+        hook_blocks.append(
+            "    // Tidak ada function Dart menarik yang terdeteksi di asm/.\n"
+            "    // Cari manual di pp.txt / asm/ lalu tambahkan hook di sini.\n")
+
+    body = ("    // Hook presisi di-generate MOPETOT dari hasil blutter "
+            f"({len(uniq)} function, package: {app_pkg or '?'})\n" + "".join(hook_blocks))
+
+    # ganti body onLibappLoaded pada template
+    start = tpl.index("function onLibappLoaded() {")
+    open_end = tpl.index("{", start) + 1
+    close = tpl.index("\n}", open_end)
+    script = tpl[:open_end] + "\n" + body + tpl[close:]
+    header = (
+        "/**\n"
+        " * MOPETOT — Dart Function Hook Script (auto-generated dari blutter)\n"
+        f" * Target: {app_package or '?'} | hook: {len(uniq)} function Dart\n"
+        " * Pakai bersama blutter_frida.js helpers (sudah include di bawah).\n"
+        " * Jalankan: frida -U -f <package> -l dart_hooks.js\n"
+        " */\n")
+    return header + script

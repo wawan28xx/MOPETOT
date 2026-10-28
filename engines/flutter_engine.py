@@ -47,19 +47,17 @@ def extract_flutter_dart_corpus(libapp: Path, corpus: Path):
         log(f"Flutter Dart extraction failed: {e}", "warn")
 
 
-def run(libapp: Path, root: Path, corpus: Path, opts: dict):
-    flutter_so = None
-    for p in root.rglob("libflutter.so"):
-        flutter_so = p
-        break
-
+def _run_blutter_dir(lib_dir: Path, corpus: Path, opts: dict) -> bool:
+    """Jalankan blutter pada direktori berisi libapp.so (+libflutter.so).
+    Return True bila berhasil (pp.txt dihasilkan)."""
+    libapp = lib_dir / "libapp.so"
     # Fast mode: skip blutter, langsung fallback ke string extraction
     skip_blutter = opts.get("skip_blutter", False)
     blutter = None if skip_blutter else find_tool("blutter")
 
     if skip_blutter:
         log("Fast mode: blutter di-skip (Dart string extraction saja)", "warn")
-    elif blutter and libapp.parent.name != "armeabi-v7a":
+    elif blutter and lib_dir.name != "armeabi-v7a":
         # blutter hanya untuk arm64/x64; CLI: blutter_run.py <lib_dir> <outdir>
         outdir = corpus / "flutter_blutter"
         outdir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +68,7 @@ def run(libapp: Path, root: Path, corpus: Path, opts: dict):
         rc, out, err = run_cmd(cmd, timeout=3600, stream=True)
         if rc == 0 and (outdir / "pp.txt").exists():
             log(f"blutter: Dart class dump -> {outdir} (pp.txt, objs.txt, asm/, blutter_frida.js)", "ok")
-            return
+            return True
         log(f"blutter gagal ({(err or '')[:100]}), fallback strings", "warn")
     elif blutter:
         log("blutter dilewati untuk armeabi-v7a (arm64/x64 saja), fallback strings", "warn")
@@ -79,6 +77,33 @@ def run(libapp: Path, root: Path, corpus: Path, opts: dict):
 
     # Fallback: deep dart string extractor
     extract_flutter_dart_corpus(libapp, corpus)
+    return False
+
+
+def run(libapp: Path, root: Path, corpus: Path, opts: dict):
+    return _run_blutter_dir(libapp.parent, corpus, opts)
+
+
+def run_ios(app_dir: Path, workdir: Path, corpus: Path, opts: dict):
+    """Flutter iOS: Dart AOT ada di Frameworks/App.framework/App.
+    Stage copy dengan nama libapp.so/libflutter.so (konvensi blutter),
+    lalu dump via blutter (TARGET_OS diambil dari snapshot flags)."""
+    app_fw = app_dir / "Frameworks" / "App.framework" / "App"
+    flutter_fw = None
+    for cand in (app_dir / "Frameworks" / "Flutter.framework").rglob("*"):
+        if cand.is_file() and cand.name == "Flutter":
+            flutter_fw = cand
+            break
+    if not app_fw.exists() or flutter_fw is None:
+        return False
+
+    log("Flutter iOS terdeteksi (App.framework) — staging untuk blutter", "ok")
+    stage = Path(workdir) / "flutter_ios_stage"
+    stage.mkdir(parents=True, exist_ok=True)
+    import shutil as _sh
+    _sh.copy2(app_fw, stage / "libapp.so")
+    _sh.copy2(flutter_fw, stage / "libflutter.so")
+    return _run_blutter_dir(stage, corpus, opts)
 
     # native strings + symbols pada libapp.so
     native_engine.run(libapp, corpus, opts)

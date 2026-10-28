@@ -1529,6 +1529,7 @@ function loadLiveVerifier() {
     html += '<div style="display:flex; gap:8px;">';
     html += '<button class="btn btn-sm btn-primary" onclick="openFridaModalDirect()" style="display:flex; align-items:center; gap:6px; border-color:#ff2d55;">💉 View Frida Bypass Script (.js)</button>';
     html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
+    html += '<button class="btn btn-sm" onclick="openDartHookModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🪝 Dart Function Hooks</button>';
     html += '</div></div>';
     html += '<div class="section-content" id="rasp-bypass-container">';
     html += '<p class="subtitle" style="margin-bottom:16px;">Frida hook script untuk melewati proteksi runtime target (SSL pinning, root detection, biometric, crypto dumper). Jalankan dengan: <code style="font-family:var(--font-mono); color:#00f0ff;">frida -U -f [package] -l bypass_hooks.js</code></p>';
@@ -3113,6 +3114,36 @@ async function runFindingValidation() {
     if (!window._vfStop) prog.innerHTML = '✅ Selesai: ' + list.length + ' temuan divalidasi' + truncated + '. Lanjut debat / arahkan agent di chat bawah.';
     btn.disabled = false;
     if (stopBtn) stopBtn.style.display = 'none';
+}
+
+function openDartHookModal() {
+    fetch('/api/scan/' + SCAN_ID + '/dart-hook-script')
+        .then(function(r) {
+            if (!r.ok) {
+                return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t); });
+            }
+            return r.text();
+        })
+        .then(function(scriptCode) {
+            document.getElementById('verify-modal-title').textContent = 'Dart Function Hook Script (auto-generated)';
+            document.getElementById('verify-modal-target').textContent = 'Target Package: ' + (globalScanData.package_name || 'com.target.app');
+            document.getElementById('verify-modal-verdict').textContent = 'DART HOOKS READY';
+            document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-medium';
+
+            let modalHtml = '<div style="margin-bottom:14px;"><p style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">Hook presisi dari hasil <strong>blutter</strong> — function Dart menarik (login / auth / token / crypto) dengan <strong>offset pasti</strong> + object dumper. Jalankan: <code style="font-family:var(--font-mono); color:#00f0ff;">frida -U -f ' + escHtml(globalScanData.package_name || '') + ' -l dart_hooks.js</code></p></div>';
+            modalHtml += '<div style="display:flex; gap:8px; margin-bottom:12px;">';
+            modalHtml += '<button class="btn btn-sm btn-primary" onclick="copyToClipboard(document.getElementById(\'dart-hook-raw\').innerText, this)">📋 Copy Full Script</button>';
+            modalHtml += '<a href="/api/scan/' + SCAN_ID + '/dart-hook-script" class="btn btn-sm" style="background:var(--bg-secondary);">⬇️ Download dart_hooks.js</a>';
+            modalHtml += '</div>';
+            modalHtml += '<pre id="dart-hook-raw" style="background:var(--bg-primary); padding:16px; border-radius:8px; font-family:var(--font-mono); font-size:12px; color:#a78bfa; max-height:450px; overflow-y:auto; line-height:1.6;">' + escHtml(scriptCode) + '</pre>';
+
+            document.getElementById('verify-modal-content').innerHTML = modalHtml;
+            const modal = document.getElementById('verify-modal');
+            modal.style.display = 'flex';
+        })
+        .catch(function(err) {
+            alert('Gagal generate Dart hook script: ' + err.message);
+        });
 }
 
 function openFridaModalDirect() {
