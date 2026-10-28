@@ -1531,6 +1531,10 @@ function loadLiveVerifier() {
     html += '<a href="/api/scan/' + SCAN_ID + '/frida-script" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">⬇️ Download .js</a>';
     html += '<button class="btn btn-sm" onclick="openDartHookModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🪝 Dart Function Hooks</button>';
     html += '<button class="btn btn-sm" onclick="openDartInspectorModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🔍 Dart Inspector</button>';
+    if (String(globalScanData.platform || '').toLowerCase() === 'ios') {
+        html += '<button class="btn btn-sm" onclick="openIosHookModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">🪝 ObjC Hooks</button>';
+        html += '<button class="btn btn-sm" onclick="openIosInspectorModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">📱 ObjC Inspector</button>';
+    }
     html += '<button class="btn btn-sm" onclick="openRunDeviceModal()" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;">▶ Run di Device</button>';
     html += '<a href="/api/scan/' + SCAN_ID + '/mitm-addon" class="btn btn-sm" style="background:var(--bg-card); display:flex; align-items:center; gap:6px;" download>🛡️ mitm Addon</a>';
     html += '</div></div>';
@@ -3338,6 +3342,113 @@ function openDartHookModal() {
         .catch(function(err) {
             alert('Gagal generate Dart hook script: ' + err.message);
         });
+}
+
+function openIosHookModal() {
+    fetch('/api/scan/' + SCAN_ID + '/ios-hook-script')
+        .then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error(t || ('HTTP ' + r.status)); });
+            return r.text();
+        })
+        .then(function(scriptCode) {
+            document.getElementById('verify-modal-title').textContent = 'iOS ObjC Hook Script (auto-generated)';
+            document.getElementById('verify-modal-target').textContent = 'Target: ' + (globalScanData.package_name || globalScanData.app_name || '');
+            document.getElementById('verify-modal-verdict').textContent = 'OBJC HOOKS READY';
+            document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-medium';
+            let modalHtml = '<div style="margin-bottom:12px;"><p style="color:var(--text-secondary); font-size:12px; margin-bottom:6px;">Hook method ObjC menarik (login / auth / token / crypto / keychain) dari class-dump — attach ke implementation, argumen & return value di-dump sebagai string. Jalankan: <code style="font-family:var(--font-mono); color:#00f0ff;">frida -U -f &lt;bundle-id&gt; -l ios_hooks.js</code></p></div>';
+            modalHtml += '<div style="display:flex; gap:8px; margin-bottom:10px;">';
+            modalHtml += '<button class="btn btn-sm btn-primary" onclick="copyToClipboard(document.getElementById(\'ios-hook-raw\').innerText, this)">📋 Copy Full Script</button>';
+            modalHtml += '<a href="/api/scan/' + SCAN_ID + '/ios-hook-script" class="btn btn-sm" style="background:var(--bg-secondary);" download>⬇️ Download ios_hooks.js</a>';
+            modalHtml += '</div>';
+            modalHtml += '<pre id="ios-hook-raw" style="background:var(--bg-primary); padding:14px; border-radius:8px; font-family:var(--font-mono); font-size:11px; color:#a78bfa; max-height:430px; overflow-y:auto; line-height:1.6;">' + escHtml(scriptCode) + '</pre>';
+            document.getElementById('verify-modal-content').innerHTML = modalHtml;
+            document.getElementById('verify-modal').style.display = 'flex';
+        })
+        .catch(function(err) { alert('ObjC Hooks: ' + err.message); });
+}
+
+function openIosInspectorModal() {
+    fetch('/api/scan/' + SCAN_ID + '/ios-classes?q=&limit=300')
+        .then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error(t || ('HTTP ' + r.status)); });
+            return r.json();
+        })
+        .then(function(data) {
+            window._iosClasses = data;
+            document.getElementById('verify-modal-title').textContent = 'ObjC Inspector (class-dump)';
+            document.getElementById('verify-modal-target').textContent = 'Target: ' + (globalScanData.package_name || globalScanData.app_name || '');
+            document.getElementById('verify-modal-verdict').textContent = data.stats.classes + ' CLASS';
+            document.getElementById('verify-modal-verdict').className = 'ctx-sev-chip sev-medium';
+            let html = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center;">';
+            html += '<select id="ios-bin-select" onchange="renderIosBin()" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; font-family:var(--font-mono); max-width:260px;">';
+            data.bins.forEach(function(b, i) {
+                html += '<option value="' + i + '">' + escHtml(b.binary) + ' (' + b.classes.length + ' class)</option>';
+            });
+            html += '</select>';
+            html += '<input id="ios-cls-search" placeholder="filter class/method..." oninput="renderIosBin()" style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; font-family:var(--font-mono); width:180px;">';
+            html += '<button class="btn btn-sm" onclick="openIosHookModal()" style="background:var(--bg-secondary);">🪝 Generate Hooks</button>';
+            html += '</div>';
+            html += '<div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Klik method untuk snippet hook Frida siap pakai. ' + data.stats.classes + ' class / ' + data.stats.methods + ' method dimuat.' + (data.truncated ? ' (dipotong 300 — pakai filter)' : '') + '</div>';
+            html += '<div id="ios-cls-list" style="background:var(--bg-primary); padding:12px; border-radius:8px; max-height:420px; overflow-y:auto;"></div>';
+            document.getElementById('verify-modal-content').innerHTML = html;
+            document.getElementById('verify-modal').style.display = 'flex';
+            renderIosBin();
+        })
+        .catch(function(err) { alert('ObjC Inspector: ' + err.message); });
+}
+
+function renderIosBin() {
+    var data = window._iosClasses;
+    if (!data) return;
+    var idx = parseInt(document.getElementById('ios-bin-select').value || '0', 10);
+    var q = (document.getElementById('ios-cls-search').value || '').toLowerCase();
+    var bin = data.bins[idx];
+    var el = document.getElementById('ios-cls-list');
+    if (!bin || !el) return;
+    var html = '';
+    bin.classes.forEach(function(c) {
+        var hit = !q || c.class.toLowerCase().indexOf(q) >= 0 ||
+            (c.methods || []).some(function(m) { return String(m).toLowerCase().indexOf(q) >= 0; });
+        if (!hit) return;
+        html += '<div style="margin-bottom:10px; border:1px solid var(--border); border-radius:8px; padding:8px 10px;">';
+        html += '<div style="font-family:var(--font-mono); font-size:12px; color:#00f0ff; font-weight:700;">' + escHtml(c.class) + (c.super ? (' <span style="color:var(--text-secondary); font-weight:400;">: ' + escHtml(c.super) + '</span>') : '') + (c.swift ? ' <span style="color:#f59e0b;">[Swift]</span>' : '') + '</div>';
+        (c.methods || []).forEach(function(m) {
+            html += '<div onclick="showIosMethodHook(\'' + escJs(c.class) + '\', \'' + escJs(String(m)) + '\')" style="cursor:pointer; font-family:var(--font-mono); font-size:11px; color:var(--text-primary); padding:2px 0 2px 14px;" onmouseover="this.style.color=\'#00f0ff\'" onmouseout="this.style.color=\'var(--text-primary)\'">- ' + escHtml(String(m)) + '</div>';
+        });
+        (c.class_methods || []).forEach(function(m) {
+            html += '<div onclick="showIosMethodHook(\'' + escJs(c.class) + '\', \'' + escJs(String(m)) + '\')" style="cursor:pointer; font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); padding:2px 0 2px 14px;" onmouseover="this.style.color=\'#00f0ff\'" onmouseout="this.style.color=\'var(--text-secondary)\'">+ ' + escHtml(String(m)) + '</div>';
+        });
+        html += '</div>';
+    });
+    el.innerHTML = html || '<div style="color:var(--text-secondary); font-size:12px; padding:8px;">tidak ada class yang cocok.</div>';
+}
+
+function showIosMethodHook(cls, sel) {
+    var snippet = 'var klass = ObjC.classes["' + cls + '"];\n' +
+        'var m = klass["' + sel + '"];\n' +
+        'Interceptor.attach(m.implementation, {\n' +
+        '    onEnter: function (args) {\n' +
+        '        console.log("[HOOK] ' + cls + ' ' + sel + '");\n' +
+        '        for (var i = 2; i < 5; i++) {\n' +
+        '            try { console.log("  arg" + (i-2) + ": " + new ObjC.Object(args[i]).toString()); } catch (e) {}\n' +
+        '        }\n' +
+        '    },\n' +
+        '    onLeave: function (rv) {\n' +
+        '        try { console.log("  ret: " + new ObjC.Object(rv).toString()); } catch (e) {}\n' +
+        '    }\n' +
+        '});';
+    var w = window.open('', '_blank');
+    if (w) {
+        w.document.write('<pre style="background:#0b0f1a;color:#a78bfa;padding:16px;font-family:monospace;font-size:12px;">' +
+            snippet.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>');
+        w.document.close();
+    } else {
+        alert(snippet);
+    }
+}
+
+function escJs(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '');
 }
 
 function openFridaModalDirect() {

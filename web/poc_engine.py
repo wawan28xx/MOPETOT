@@ -1722,3 +1722,268 @@ class MopetotTagger:
 
 addons = [MopetotTagger()]
 '''
+
+
+# ======================================================================
+# iOS UTILITIES (ObjC class-dump): Hook Generator + Inspector
+# ======================================================================
+# Sumber data: corpus/sources_ios_symbols/*_classes.json (runtime parser — full)
+# atau *_classes.h (fallback symbol table — parsial, tetap berguna).
+
+_IOS_INTEREST_RE = re.compile(
+    r"(login|logout|auth|password|passwd|credential|token|session|secret|"
+    r"api_?key|encrypt|decrypt|crypt|sign|certificate|ssl|tls|pinning|"
+    r"biometric|touchid|faceid|jailbreak|rooted?|deviceid|otp|cookie|"
+    r"keychain|header|jwt|refresh)", re.I)
+
+# Class sistem Apple — tidak menarik untuk di-hook (noise)
+_IOS_SYSTEM_PREFIXES = (
+    "NS", "UI", "CF", "CA", "CL", "SK", "MK", "MP", "AV", "CN", "CT", "PK",
+    "WK", "AS", "GK", "OS", "SC", "Sec", "CG", "CTK", "EK", "MT", "NL", "PN",
+)
+
+
+def _ios_class_is_system(cls_name: str) -> bool:
+    n = cls_name or ""
+    if not n:
+        return True
+    return n.startswith(_IOS_SYSTEM_PREFIXES) or n.startswith("_Tt")  # _TtC = Swift mangling
+
+
+def _ios_load_targets(corpus_dir: Path) -> List[Dict[str, Any]]:
+    """Kumpulkan semua (binary, class, methods) dari sources_ios_symbols.
+
+    Format didukung:
+    - <bin>_classes.json  : hasil runtime parser (full: methods+ivars+props)
+    - <bin>_classes.h     : format baru (rendered) atau legacy (lief symbols)
+    """
+    sym_dir = corpus_dir / "sources_ios_symbols"
+    if not sym_dir.exists():
+        return []
+    targets = []
+    # 1) JSON (hasil runtime parser)
+    for jf in sorted(sym_dir.glob("*_classes.json")):
+        try:
+            data = json.loads(jf.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        binary = data.get("binary") or jf.name.replace("_classes.json", "")
+        for c in data.get("classes") or []:
+            name = c.get("name")
+            if not name:
+                continue
+            targets.append({
+                "binary": binary, "class": name,
+                "super": c.get("super") or "", "swift": bool(c.get("swift")),
+                "methods": [m[0] if isinstance(m, (list, tuple)) else m
+                            for m in (c.get("methods") or [])],
+                "class_methods": [m[0] if isinstance(m, (list, tuple)) else m
+                                  for m in (c.get("class_methods") or [])],
+                "source": "runtime-dump",
+            })
+        for cat in data.get("categories") or []:
+            cname = cat.get("class")
+            if not cname:
+                continue
+            targets.append({
+                "binary": binary, "class": cname, "super": "", "swift": False,
+                "methods": [m[0] if isinstance(m, (list, tuple)) else m
+                            for m in (cat.get("methods") or [])],
+                "class_methods": [m[0] if isinstance(m, (list, tuple)) else m
+                                  for m in (cat.get("class_methods") or [])],
+                "source": "category",
+            })
+    seen_json_bins = {t["binary"] for t in targets}
+    # 2) Header .h — hanya binary tanpa JSON (scan lama / hasil fallback)
+    for hf in sorted(sym_dir.glob("*_classes.h")):
+        binary = hf.name.replace("_classes.h", "")
+        if binary in seen_json_bins:
+            continue
+        try:
+            text = hf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        # format baru: blok @interface diikuti baris "    - (id) sel:;"
+        cur = {"binary": binary, "class": "", "super": "", "swift": False,
+               "methods": [], "class_methods": [], "source": "header"}
+        for line in text.splitlines():
+            mi = re.match(r"@interface\s+([\w$]+)\s*:\s*([\w$]+)", line)
+            if mi:
+                if cur["class"] and (cur["methods"] or cur["class_methods"]):
+                    targets.append(cur)
+                cur = {"binary": binary, "class": mi.group(1), "super": mi.group(2),
+                       "swift": False, "methods": [], "class_methods": [], "source": "header"}
+                continue
+            mm = re.match(r"\s*[-+]\s*\([^)]*\)\s*([.\w:$]+)\s*;", line)
+            if mm and cur["class"]:
+                (cur["class_methods"] if line.strip().startswith("+")
+                 else cur["methods"]).append(mm.group(1))
+        if cur["class"] and (cur["methods"] or cur["class_methods"]):
+            targets.append(cur)
+        # format legacy (lief symbols): "-[Class sel:]" per baris
+        legacy: Dict[str, List[str]] = {}
+        for line in text.splitlines():
+            ml = re.match(r"[-+]\[\s*([\w$]+)\s+([\w:$]+)\]", line.strip())
+            if ml:
+                legacy.setdefault(ml.group(1), []).append(ml.group(2))
+        for cname, sels in legacy.items():
+            targets.append({"binary": binary, "class": cname, "super": "",
+                            "swift": False, "methods": sels, "class_methods": [],
+                            "source": "legacy-symbols"})
+    return targets
+
+
+def ios_inspect(corpus_dir: Path, query: str = "", limit: int = 300) -> Dict[str, Any]:
+    """iOS Inspector: inventory class/method dari class-dump (filter query opsional)."""
+    targets = _ios_load_targets(corpus_dir)
+    q = (query or "").strip().lower()
+    bins: Dict[str, Dict[str, Any]] = {}
+    shown = 0
+    for t in targets:
+        if q and q not in t["class"].lower() \
+                and not any(q in m.lower() for m in t["methods"]):
+            continue
+        if shown >= limit:
+            break
+        shown += 1
+        b = bins.setdefault(t["binary"], {"binary": t["binary"], "classes": []})
+        b["classes"].append({
+            "class": t["class"], "super": t.get("super") or "",
+            "swift": t.get("swift", False), "source": t.get("source", ""),
+            "methods": (t.get("methods") or [])[:80],
+            "class_methods": (t.get("class_methods") or [])[:40],
+        })
+    stats = {
+        "binaries": len(bins),
+        "classes": sum(len(b["classes"]) for b in bins.values()),
+        "methods": sum(len(c["methods"]) + len(c["class_methods"])
+                       for b in bins.values() for c in b["classes"]),
+    }
+    return {"bins": list(bins.values()), "stats": stats, "truncated": shown >= limit}
+
+
+def _ios_selector_name(sel: str) -> str:
+    return (sel or "").strip().rstrip(";")
+
+
+def _js_escape(s: str) -> str:
+    return (s or "").replace("\\", "\\\\").replace("'", "\\'")
+
+
+def generate_ios_hook_script(corpus_dir: Path, max_hooks: int = 25) -> Dict[str, Any]:
+    """Generate Frida ObjC hook script dari class-dump iOS.
+
+    Pilih method menarik (login/auth/token/crypto/keychain/...) dari class
+    non-sistem, lalu emit Interceptor.attach ke implementation-nya.
+    Return {"script": str, "hooks": [...], "note": str}
+    """
+    targets = _ios_load_targets(corpus_dir)
+    if not targets:
+        return {"script": "", "hooks": [],
+                "note": "tidak ada class-dump iOS (sources_ios_symbols kosong) — rescan app iOS"}
+
+    # nama binary utama app (work/corpus -> work/ipa_root/Payload/*.app/X) untuk prioritas
+    main_bins = set()
+    try:
+        payload = corpus_dir.parent / "ipa_root" / "Payload"
+        for app_dir in payload.glob("*.app"):
+            main_bins.add(app_dir.stem)
+    except OSError:
+        pass
+
+    scored = []
+    for t in targets:
+        if _ios_class_is_system(t["class"]):
+            continue
+        for kind in ("methods", "class_methods"):
+            for sel in t.get(kind) or []:
+                sel = _ios_selector_name(sel)
+                if not sel or sel.startswith("_"):
+                    continue
+                score = 0
+                if not _IOS_INTEREST_RE.search(sel):
+                    continue  # selector wajib menarik — nama class saja tidak cukup (noise)
+                score += 15
+                if _IOS_INTEREST_RE.search(t["class"]):
+                    score += 5
+                if t.get("swift"):
+                    score += 1
+                if t["binary"] in main_bins:
+                    score += 8  # class milik app sendiri > class SDK pihak-3
+                scored.append((score, t["binary"], t["class"], sel, kind == "class_methods"))
+    # dedupe (class, sel), urut skor turun lalu abjad
+    seen = set()
+    uniq = []
+    for score, binary, cls, sel, is_class_m in sorted(
+            scored, key=lambda x: (-x[0], x[2], x[3])):
+        key = (cls, sel)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append({"score": score, "binary": binary, "class": cls,
+                     "selector": sel, "static": is_class_m})
+    uniq = uniq[:max_hooks]
+
+    lines = [
+        "/**",
+        " * MOPETOT — iOS ObjC Hook Script (auto-generated dari class-dump)",
+        " * Hook: " + str(len(uniq)) + " method menarik (login/auth/token/crypto/keychain)",
+        " * Jalankan: frida -U -f <bundle-id> -l ios_hooks.js",
+        " * Note: hook di-attach ke implementation method ObjC — objek arg/ret",
+        " *       di-dump sebagai string (try/catch per argumen).",
+        " */",
+        "",
+        "var TARGETS = [",
+    ]
+    for t in uniq:
+        lines.append("    { cls: '" + _js_escape(t["class"]) + "', sel: '"
+                     + _js_escape(t["selector"]) + "', static: "
+                     + ("true" if t["static"] else "false") + ", bin: '"
+                     + _js_escape(t["binary"]) + "' },")
+    lines.append("];")
+    lines += [
+        "",
+        "if (typeof ObjC === 'undefined' || !ObjC.available) {",
+        "    console.log('[iOS] ObjC runtime tidak tersedia — jalankan di device iOS');",
+        "} else {",
+        "    TARGETS.forEach(function (t) {",
+        "        try {",
+        "            var klass = ObjC.classes[t.cls];",
+        "            if (!klass) { console.log('[iOS] class tidak ada: ' + t.cls); return; }",
+        "            var m = klass[t.sel];",
+        "            if (!m) { console.log('[iOS] selector tidak ada: ' + t.cls + ' -> ' + t.sel); return; }",
+        "            Interceptor.attach(m.implementation, {",
+        "                onEnter: function (args) {",
+        "                    console.log('[HOOK] ' + t.cls + ' ' + t.sel + ' (' + t.bin + ')');",
+        "                    for (var i = 2; i < 6; i++) {",
+        "                        try {",
+        "                            if (args[i] === null || args[i] === undefined) continue;",
+        "                            var o = new ObjC.Object(args[i]);",
+        "                            var s = o.toString ? o.toString() : 'non-obj';",
+        "                            if (s.length > 512) s = s.slice(0, 512) + '...';",
+        "                            console.log('    arg' + (i - 2) + ': ' + s);",
+        "                        } catch (e) { }",
+        "                    }",
+        "                },",
+        "                onLeave: function (rv) {",
+        "                    try {",
+        "                        if (rv === null || rv === undefined) return;",
+        "                        var o = new ObjC.Object(rv);",
+        "                        var s = o.toString ? o.toString() : 'non-obj';",
+        "                        if (s.length > 512) s = s.slice(0, 512) + '...';",
+        "                        console.log('    ret: ' + s);",
+        "                    } catch (e) { }",
+        "                }",
+        "            });",
+        "            console.log('[iOS] hooked: ' + t.cls + ' -> ' + t.sel);",
+        "        } catch (e) { console.log('[iOS] fail ' + t.cls + ': ' + e); }",
+        "    });",
+        "}",
+        "",
+    ]
+    note = ""
+    if not uniq:
+        note = ("tidak ada method menarik (login/auth/token/crypto) di class non-sistem — "
+                "buka iOS Inspector untuk browse manual; binary FairPlay-encrypted hanya "
+                "menyediakan symbol parsial")
+    return {"script": "\n".join(lines), "hooks": uniq, "note": note}

@@ -17,69 +17,118 @@ from . import native_engine, plist_engine, generic_engine
 
 
 def extract_objc_swift_symbols(macho_path: Path, corpus: Path):
-    """Ekstraksi terstruktur Objective-C & Swift Class Hierarchy / Method Signatures (Class-Dump equivalent)."""
-    r2 = find_tool("rabin2")
+    """Ekstraksi terstruktur Objective-C & Swift Class Hierarchy / Method Signatures (Class-Dump equivalent).
+
+    Urutan strategi:
+    1. Parser ObjC runtime pure-Python (engines/objc_dump.py) — class-dump penuh
+       (class/super/protocols/methods/ivars/properties/kategori). rabin2 6.x di
+       Windows tidak bisa dipakai (flag -C berubah & plugin ObjC rusak: "UnnamedClass").
+    2. Fallback lief: symbol table tidak ikut terenkripsi FairPlay, jadi tetap berguna
+       untuk binary cryptid-encrypted; symbol Swift `_$s` di-demangle parsial.
+    """
     out_dir = corpus / "sources_ios_symbols"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{macho_path.name}_classes.h"
 
+    banner = ["// ====================================================================",
+              f"// MOPETOT iOS Class-Dump: {macho_path.name}",
+              "// ===================================================================="]
+
+    # 1. Class-dump runtime ObjC via parser internal
+    dump_note = None
+    try:
+        from .objc_dump import dump_binary, swift_demangle_partial
+        r = dump_binary(macho_path)
+        if r.get("ok"):
+            swift_syms = _swift_symbols_lief(macho_path, swift_demangle_partial)
+            lines = list(banner)
+            lines.append(f"// arch: {r['arch']} | classes: {r['stats']['classes']} | "
+                         f"methods: {r['stats']['methods']} | categories: {r['stats']['categories']}")
+            lines += ["", r["header"]]
+            if swift_syms:
+                lines += ["", "// --- Swift symbols (demangled parsial) ---", *swift_syms]
+            out_file.write_text("\n".join(lines), encoding="utf-8", errors="replace")
+            # struktur JSON untuk Hook Generator / iOS Inspector
+            (out_dir / f"{macho_path.name}_classes.json").write_text(
+                json.dumps({"binary": macho_path.name, "arch": r["arch"], "stats": r["stats"],
+                            "classes": r["classes"], "categories": r["categories"]},
+                           indent=1, ensure_ascii=False),
+                encoding="utf-8", errors="replace")
+            log(f"iOS Class-Dump (runtime parser): {macho_path.name} -> "
+                f"{r['stats']['classes']} classes / {r['stats']['methods']} methods", "ok")
+            return
+        dump_note = r.get("error")
+        if r.get("encrypted"):
+            dump_note = "FairPlay/cryptid ENCRYPTED"
+    except Exception as e:
+        dump_note = f"parser error: {e}"
+
+    # 2. Fallback: symbol table via lief (tetap jalan untuk binary encrypted)
+    try:
+        from .objc_dump import swift_demangle_partial
+    except Exception:
+        def swift_demangle_partial(_s):
+            return None
     classes_found = set()
     methods_found = set()
-    protocols_found = set()
-
-    # 1. Gunakan rabin2 -C (Objective-C Classes & Methods dump) jika tersedia
-    if r2:
-        rc, out, err = run([str(r2), "-C", "-qq", str(macho_path)], timeout=180, stream=False)
-        if rc == 0 and out and ("class " in out or "method " in out or "@interface" in out or "objc" in out.lower()):
-            out_file.write_text(out, encoding="utf-8", errors="replace")
-            log(f"iOS Class-Dump (rabin2 -C): {macho_path.name} -> {out_file.name}", "ok")
-            return
-
-    # 2. Fallback: Ekstraksi via lief / symbol demangling untuk Swift & Obj-C
+    swift_found = set()
     try:
         import lief
         binary = lief.parse(str(macho_path))
         if binary:
             for s in binary.symbols:
                 name = s.name or ""
-                # ObjC Class: _OBJC_CLASS_$_MyClass
                 if "_OBJC_CLASS_$_" in name:
                     cname = name.split("_OBJC_CLASS_$_")[-1]
                     classes_found.add(f"@interface {cname} : NSObject")
-                # ObjC Method: -[MyClass myMethod:] or +[MyClass myMethod:]
                 elif (name.startswith("-[") or name.startswith("+[")) and name.endswith("]"):
                     methods_found.add(name)
-                # Swift Mangled Symbols: _$s... / $s...
                 elif name.startswith("_$s") or name.startswith("$s"):
-                    classes_found.add(f"// Swift Symbol: {name}")
+                    swift_found.add(swift_demangle_partial(name) or f"// Swift Symbol: {name}")
     except Exception:
         pass
 
-    # 3. Fallback: Scan raw binary untuk Objective-C selector & class strings
-    if not classes_found and not methods_found:
-        try:
-            data = macho_path.read_bytes()
-            # Cari pola Obj-C selector
-            objc_methods = re.findall(rb'[-+][\w\(\)\s\*]+\[[\w]+\s+[\w:]+\]', data)
-            for m in objc_methods:
+    content = list(banner)
+    if dump_note:
+        content.append(f"// NOTE: {dump_note} — dump dari runtime ObjC tidak tersedia;")
+        content.append("//       section di bawah adalah hasil fallback symbol table (parsial).")
+        if dump_note.startswith("FairPlay"):
+            content.append("//       Untuk class-dump penuh, dump binary ter-dekripsi dari device jailbroken.")
+    content += ["", "// --- Classes ---"]
+    content.extend(sorted(classes_found))
+    content += ["", "// --- Methods / Selectors ---"]
+    content.extend(sorted(methods_found))
+    if swift_found:
+        content += ["", "// --- Swift Symbols ---"]
+        content.extend(sorted(swift_found))
+    if len(content) > len(banner) + 5:
+        out_file.write_text("\n".join(content), encoding="utf-8", errors="replace")
+        log(f"iOS Class-Dump (fallback symbols): {macho_path.name} "
+            f"({len(classes_found)} classes, {len(methods_found)} methods, {len(swift_found)} swift)", "ok")
+
+
+def _swift_symbols_lief(macho_path: Path, demangler) -> list:
+    """Ambil symbol Swift dari symtab via lief dan demangle parsial (maks 400 baris)."""
+    out = []
+    try:
+        import lief
+        binary = lief.parse(str(macho_path))
+        if not binary:
+            return out
+        for s in binary.symbols:
+            name = s.name or ""
+            if name.startswith("_$s") or name.startswith("$s"):
+                dm = None
                 try:
-                    methods_found.add(m.decode("utf-8", errors="ignore"))
+                    dm = demangler(name)
                 except Exception:
                     pass
-        except Exception:
-            pass
-
-    if classes_found or methods_found:
-        content = ["// ============================================================================",
-                   f"// iOS Objective-C & Swift Class-Dump (Extracted from {macho_path.name})",
-                   "// ============================================================================",
-                   "",
-                   "// --- Classes ---"]
-        content.extend(sorted(classes_found))
-        content.extend(["", "// --- Methods / Selectors ---"])
-        content.extend(sorted(methods_found))
-        out_file.write_text("\n".join(content), encoding="utf-8", errors="replace")
-        log(f"iOS Class-Dump: {macho_path.name} ({len(classes_found)} classes, {len(methods_found)} methods)", "ok")
+                out.append(f"{dm or name}")
+                if len(out) >= 400:
+                    break
+    except Exception:
+        pass
+    return out
 
 
 def unpack_ipa(target: Path, workdir: Path, opts: dict):

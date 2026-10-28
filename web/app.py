@@ -35,7 +35,7 @@ from verification import (
     check_aws_sts_identity, check_stripe_key, check_webhook_status, check_credential_login
 )
 
-from poc_engine import (PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION, generate_dart_hook_script, dart_packages, dart_package_detail, dart_routes, dart_function_diff, summarize_dart_context, generate_mitm_addon)
+from poc_engine import (PoCEngine, build_pocs_payload, POC_PAYLOAD_VERSION, generate_dart_hook_script, dart_packages, dart_package_detail, dart_routes, dart_function_diff, summarize_dart_context, generate_mitm_addon, generate_ios_hook_script, ios_inspect)
 from concurrent.futures import ProcessPoolExecutor
 
 # PoC build jalan di PROCESS pool: CPU-bound berat (walk corpus + regex)
@@ -1771,6 +1771,47 @@ async def api_get_dart_hook_script(scan_id: int):
         return PlainTextResponse(script, headers={
             "Content-Disposition": f'attachment; filename="dart_hooks_{scan_id}.js"'
         })
+    finally:
+        await db.close()
+
+
+@app.get("/api/scan/{scan_id}/ios-hook-script")
+async def api_get_ios_hook_script(scan_id: int):
+    """Generate Frida ObjC hook script dari class-dump iOS (login/auth/token/crypto)."""
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        corpus = RESULTS_DIR / str(scan_id) / "work" / "corpus"
+        sym_dir = corpus / "sources_ios_symbols"
+        if not sym_dir.exists() or not list(sym_dir.glob("*_classes.*")):
+            raise HTTPException(404, "Bukan app iOS atau class-dump belum tersedia "
+                                     "(rescan ulang app iOS ini)")
+        result = await asyncio.to_thread(generate_ios_hook_script, corpus)
+        if not result["hooks"]:
+            raise HTTPException(404, result["note"])
+        return PlainTextResponse(result["script"], headers={
+            "Content-Disposition": f'attachment; filename="ios_hooks_{scan_id}.js"'
+        })
+    finally:
+        await db.close()
+
+
+@app.get("/api/scan/{scan_id}/ios-classes")
+async def api_ios_classes(scan_id: int, q: str = "", limit: int = 300):
+    """iOS Inspector: inventory class/method dari class-dump (query opsional)."""
+    db = await get_db()
+    try:
+        scan = await get_scan(db, scan_id)
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        corpus = RESULTS_DIR / str(scan_id) / "work" / "corpus"
+        data = await asyncio.to_thread(ios_inspect, corpus, q, min(limit, 1000))
+        if not data["bins"]:
+            raise HTTPException(404, "Bukan app iOS atau class-dump belum tersedia "
+                                     "(rescan ulang app iOS ini)")
+        return JSONResponse(data)
     finally:
         await db.close()
 
