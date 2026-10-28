@@ -50,7 +50,7 @@ def _poc_pool() -> ProcessPoolExecutor:
         _POC_POOL = ProcessPoolExecutor(max_workers=2)
     return _POC_POOL
 
-from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, agent_job_new, agent_job_get, agent_job_finish, make_logger
+from chat import get_llm_config, ask_assistant, ChatError, build_validation_message, agent_job_new, agent_job_get, agent_job_finish, make_logger, build_all_findings_inventory
 import code_explorer as ce
 
 logger = logging.getLogger(__name__)
@@ -1483,6 +1483,14 @@ async def api_chat(scan_id: int, request: Request):
             cache_rows = await get_verification_cache(db, scan_id)
             verifier_rows = [dict(r) for r in cache_rows]
 
+        # Mode chat bebas: sertakan INVENTARIS semua temuan (nilai utuh) +
+        # hasil verifier — agent bisa "validasi semua + chaining" tanpa minta data.
+        inventory = None
+        if not secret_row:
+            all_secrets = [dict(s) for s in await get_secrets(db, scan_id)]
+            cache_rows = [dict(r) for r in await get_verification_cache(db, scan_id)]
+            inventory = build_all_findings_inventory(all_secrets, cache_rows) or None
+
         # Mode validate: bangun prompt validasi (server-side)
         if validation_ctx:
             module = validation_ctx["module"]
@@ -1522,7 +1530,8 @@ async def api_chat(scan_id: int, request: Request):
 
         try:
             reply = await asyncio.to_thread(
-                ask_assistant, secret_row, verifier_rows, history, message, cfg
+                ask_assistant, secret_row, verifier_rows, history, message, cfg,
+                None, inventory
             )
         except ChatError as e:
             return JSONResponse({"error": str(e)}, status_code=502)
@@ -1561,6 +1570,20 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
         if secret_id:
             secrets = await get_secrets(db, scan_id)
             secret_row = next((dict(s) for s in secrets if s["id"] == secret_id), None)
+
+        # Mode chat bebas: inventaris SEMUA temuan + hasil verifier -> agent bisa
+        # "validasi semua temuan dan chaining" tanpa minta user mengirim data.
+        inventory = None
+        if not secret_row:
+            try:
+                all_secrets = [dict(s) for s in await get_secrets(db, scan_id)]
+                cache_rows = [dict(r) for r in await get_verification_cache(db, scan_id)]
+                inventory = build_all_findings_inventory(all_secrets, cache_rows) or None
+                if inventory:
+                    log("🗂 Inventaris semua temuan disertakan (%d secret) — mode chaining aktif"
+                        % len(all_secrets))
+            except Exception as e:
+                log("⚠️ Inventaris temuan GAGAL: %s" % e)
             if secret_row:
                 log("🔎 Temuan dimuat: %s | %s | severity awal %s"
                     % (secret_row.get("rule_id") or "-", secret_row.get("file_path") or "?",
@@ -1666,7 +1689,8 @@ async def _run_agent_job(job_id: str, scan_id: int, payload: dict) -> None:
 
         try:
             reply = await asyncio.to_thread(
-                ask_assistant, secret_row, verifier_rows, history, agent_message, cfg, log
+                ask_assistant, secret_row, verifier_rows, history, agent_message, cfg, log,
+                inventory
             )
         except ChatError as e:
             agent_job_finish(job_id, error=str(e))

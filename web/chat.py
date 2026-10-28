@@ -380,12 +380,14 @@ SYSTEM_PROMPT = """Kamu adalah "Verification Assistant" di dalam Mobile Audit To
 Tugas kamu: membantu hunter menganalisis dan memverifikasi temuan hardcoded secret / endpoint yang ditemukan scanner.
 
 Aturan keras:
-1. Nilai secret diberikan DALAM BENTUK UTUH (tanpa masking) supaya kamu bisa membantu validasi teknis pentester secara presisi. Ini audit berizin — perlakuan nilai sebagai data sensitif: jangan sarankan mem-publish nilai mentah ke laporan publik, gunakan format ter-mask saat menyusun REPORT DRAFT.
+1. Nilai secret diberikan DALAM BENTUK UTUH (tanpa masking) supaya kamu bisa membantu validasi teknis pentester secara presisi. Ini audit berizin — dan pentester meminta nilai TAMPIL APA ADANYA: TAMPILKAN nilai hardcoded (API key, password, token, URL) SECARA UTUH di semua analisis dan jawabanmu, TERMASUK report draft. JANGAN men-shorten/men-mask nilai (AIzaSyC3t...wFU = SALAH; tulis AIzaSyEXAMPLEREDACTED00SAMPLE0000000). Gunakan format ter-mask HANYA kalau user minta eksplisit.
 2. Hasil Live Verifier deterministik (jika ada) adalah sumber KEBENARAN utama. Rujuk verdict itu; jika bertentangan dengan tebakanmu, utamakan hasil verifier dan jelaskan kemungkinan penyebabnya.
-3. Berikan analisis yang konkret dan actionable: tipe kredensial, attack path yang paling mungkin, langkah verifikasi PASIF/AMAN dulu (mis. cek scope, format, dokumentasi provider), lalu langkah aktif bila perlu, perkiraan severity (P1-P5 / CVSS kasar), dan dampak bisnisnya.
-4. Jika diminta, susun draft kalimat laporan siap submit bug bounty (judul, deskripsi, langkah reproduksi, impact) dalam bahasa Inggris atau Indonesia sesuai permintaan.
-5. Jangan pernah mengarang hasil verifikasi yang belum dilakukan. Bilang saja "belum diverifikasi" kalau tidak ada datanya.
-6. Jawab ringkas, terstruktur (bullet/numbered), dan dalam bahasa yang sama dengan pertanyaan user.
+3. INVENTARIS TEMUAN: prompt ini sudah menyertakan daftar SEMUA temuan scan (rule, kategori, file, nilai utuh) beserta hasil verifier yang sudah dijalankan. JANGAN meminta user mengirim data yang sudah ada di inventaris — langsung proses dari situ. Kalau user bilang "validasi semua temuan" / "validasi semua" tanpa detail, itu berarti: analisis SEMUA baris di inventaris.
+4. CHAINING / LATERAL MOVEMENT: ketika diminta chaining (atau saat validasi massal), susun rantai eksploitasi antar temuan — bukan analisis per-item saja: kredensial aktif -> enumerasi resource -> pivot environment (staging->prod) -> credential reuse lintas app -> impact gabungan. Severity rantai bisa lebih tinggi dari severity per-item.
+5. Berikan analisis yang konkret dan actionable: tipe kredensial, attack path yang paling mungkin, langkah verifikasi PASIF/AMAN dulu (mis. cek scope, format, dokumentasi provider), lalu langkah aktif bila perlu, perkiraan severity (P1-P5 / CVSS kasar), dan dampak bisnisnya.
+6. Jika diminta, susun draft kalimat laporan siap submit bug bounty (judul, deskripsi, langkah reproduksi, impact) dalam bahasa Inggris atau Indonesia sesuai permintaan — tetap dengan nilai utuh sesuai aturan 1.
+7. Jangan pernah mengarang hasil verifikasi yang belum dilakukan. Sebut "belum diverifikasi" untuk item yang memang belum ada datanya — tapi jangan bilang "tidak ada data" kalau inventarisnya ada.
+8. Jawab ringkas, terstruktur (bullet/numbered), dan dalam bahasa yang sama dengan pertanyaan user.
 """
 
 
@@ -418,6 +420,37 @@ def build_finding_context(secret: dict, verifier_rows: Optional[List[dict]] = No
             if len(verdict) > 260:
                 verdict = verdict[:260] + "..."
             lines.append(f"- [{row.get('module') or '?'}] target={target or '?'} -> {verdict or 'belum ada hasil'}")
+    return "\n".join(lines)
+
+
+def build_all_findings_inventory(secrets: Optional[List[dict]],
+                                verifier_rows: Optional[List[dict]] = None,
+                                limit: int = 60) -> str:
+    """Rangkum SEMUA temuan scan (nilai utuh) + hasil verifier untuk mode chat bebas.
+
+    Ini yang bikin agent bisa "validasi semua temuan dan chaining" tanpa user
+    harus copy-paste data — inventaris sudah hidup di prompt.
+    """
+    if not secrets:
+        return ""
+    lines = ["### INVENTARIS SEMUA TEMUAN SCAN (nilai hardcoded UTUH — jangan minta user mengirim ulang)"]
+    for i, s in enumerate(secrets[:limit], 1):
+        val = str(s.get("match") or "-")
+        lines.append(
+            f"{i}. [{str(s.get('severity') or '?').upper()}] {s.get('rule_id') or s.get('category') or '-'} "
+            f"@ {str(s.get('file_path') or '?').replace(chr(92), '/').split('/')[-1]}:{s.get('line_number') or '?'} "
+            f"| nilai: {val}"
+        )
+    if verifier_rows:
+        lines.append("")
+        lines.append("### HASIL LIVE VERIFIER YANG SUDAH DIJALANKAN (ground truth)")
+        for row in verifier_rows[:12]:
+            target = str(row.get("target") or "")
+            verdict = _strip_html(str(row.get("result_html") or "")).strip()
+            if len(verdict) > 220:
+                verdict = verdict[:220] + "..."
+            if verdict:
+                lines.append(f"- [{row.get('module') or '?'}] {target or '?'} -> {verdict}")
     return "\n".join(lines)
 
 
@@ -577,7 +610,8 @@ def chat_completion(messages: List[dict], config: Optional[dict] = None,
 def ask_assistant(secret: dict, verifier_rows: Optional[List[dict]],
                   history: Optional[List[dict]], user_message: str,
                   config: Optional[dict] = None,
-                  log: Optional[Any] = None) -> str:
+                  log: Optional[Any] = None,
+                  inventory: Optional[str] = None) -> str:
     """Satu putaran percakapan. history = list of {role, content} (lama -> baru).
 
     Bila `log` diberikan: tiap tahap (skills, konteks temuan, history, prompt)
@@ -594,6 +628,10 @@ def ask_assistant(secret: dict, verifier_rows: Optional[List[dict]],
         log("🔎 Konteks temuan: %s @ %s:%s (nilai utuh, tanpa masking)"
             % (secret.get("rule_id") or "-", secret.get("file_path") or "?",
                secret.get("line_number") or "?"))
+    if inventory:
+        messages.append({"role": "system", "content": inventory})
+        if log:
+            log("🗂 Inventaris semua temuan disertakan di prompt (mode chaining)")
     if secret:
         messages.append({"role": "system", "content": build_finding_context(secret, verifier_rows)})
     if log:
