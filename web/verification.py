@@ -198,6 +198,8 @@ _GAPI_DENIAL_PATTERNS = [
      "Key valid; API belum pernah dipakai / disabled di project GCP"),
     ("it is disabled", "NOT_ACTIVATED", "DENIED — API NONAKTIF", True,
      "Key valid; API disabled di project GCP — aktifkan via console untuk jadi attack surface"),
+    ("from referer", "REF_RESTRICTED", "DENIED — REFERER RESTRICTED", True,
+     "Key valid, di-restrict ke HTTP referer tertentu — attacker butuh referer yang cocok"),
     ("client application", "CLIENT_RESTRICTED", "DENIED — CLIENT/PACKAGE RESTRICTED", True,
      "Key valid, di-restrict ke package/bundle ID aplikasi tertentu (khas mobile key)"),
     ("bundle id", "CLIENT_RESTRICTED", "DENIED — CLIENT/PACKAGE RESTRICTED", True,
@@ -245,7 +247,7 @@ def _gapi_probe_image(name: str, category: str, url: str, attempts: int = 2) -> 
     return out
 
 
-def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> dict:
+def _gapi_probe(name: str, category: str, method: str, url: str, body=None, headers=None) -> dict:
     """Satu probe API Google + klasifikasi berbasis BODY respons (bukan HTTP code!).
 
     Google Maps web services sering balas HTTP 200 padahal body JSON-nya
@@ -261,10 +263,13 @@ def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> d
     out = {"api": name, "category": category, "url": url, "method": method,
            "status": "Error", "vulnerable": False, "key_valid": None, "detail": ""}
     try:
+        hdrs = dict(HEADERS)
+        if headers:
+            hdrs.update(headers)
         if method == "POST":
-            r = _rq.post(url, json=body, headers=HEADERS, timeout=6.0, verify=False)
+            r = _rq.post(url, json=body, headers=hdrs, timeout=6.0, verify=False)
         else:
-            r = _rq.get(url, headers=HEADERS, timeout=6.0, verify=False)
+            r = _rq.get(url, headers=hdrs, timeout=6.0, verify=False)
 
         data = None
         try:
@@ -361,11 +366,11 @@ def check_google_api_key(key_str: str) -> Dict[str, Any]:
 
     probes = []
 
-    def g(name, url, category="Maps Core"):
-        probes.append((name, category, "GET", url, None))
+    def g(name, url, category="Maps Core", headers=None):
+        probes.append((name, category, "GET", url, None, headers))
 
-    def p_(name, url, body, category="Cloud AI / Data"):
-        probes.append((name, category, "POST", url, body))
+    def p_(name, url, body, category="Cloud AI / Data", headers=None):
+        probes.append((name, category, "POST", url, body, headers))
 
     # --- 1. Maps Core (10) ---
     g("Geocoding API", f"https://maps.googleapis.com/maps/api/geocode/json?address=Jakarta&key={key}")
@@ -401,6 +406,18 @@ def check_google_api_key(key_str: str) -> Dict[str, Any]:
     p_("Natural Language API", f"https://language.googleapis.com/v1/documents:analyzeSentiment?key={key}",
        {"document": {"content": "hello", "type": "PLAIN_TEXT"}})
 
+    # --- 3b. Hasil validasi manual: arah migrasi Google + endpoint image kedua ---
+    g("Street View Image", f"https://maps.googleapis.com/maps/api/streetview?location=-6.2088,106.8456&size=400x400&key={key}", "Maps Extended")
+    p_("Places API (New) — searchText", "https://places.googleapis.com/v1/places:searchText",
+       {"textQuery": "restaurant in Jakarta"}, "Maps Extended",
+       {"X-Goog-Api-Key": key, "X-Goog-FieldMask": "places.displayName"})
+    p_("Places API (New) — autocomplete", "https://places.googleapis.com/v1/places:autocomplete",
+       {"input": "Jakarta"}, "Maps Extended",
+       {"X-Goog-Api-Key": key, "Content-Type": "application/json"})
+    p_("Roads snapToRoads (POST)", f"https://roads.googleapis.com/v1/snapToRoads?path=-6.200000,106.816666|-6.210000,106.826666&interpolate=false&key={key}",
+       {}, "Maps Extended")
+    g("Custom Search JSON API", f"https://www.googleapis.com/customsearch/v1?key={key}&cx=017576662512468239146:omuauf_lfve&q=lectures", "Cloud AI / Data")
+
     # --- 4. Key Intel (2) — API wajib OAuth, error-nya membuktikan key hidup/mati ---
     g("Drive API (key intel)", f"https://www.googleapis.com/drive/v3/about?fields=user&key={key}", "Key Intel (OAuth-only)")
     g("Calendar API (key intel)", f"https://www.googleapis.com/calendar/v3/users/me/calendarList?key={key}", "Key Intel (OAuth-only)")
@@ -409,12 +426,12 @@ def check_google_api_key(key_str: str) -> Dict[str, Any]:
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = []
-        for (name, cat, method, url, body) in probes:
-            if "staticmap" in url or "/maps/embed/" in url:
+        for (name, cat, method, url, body, headers) in probes:
+            if "staticmap" in url or "/maps/embed/" in url or "/maps/api/streetview?" in url:
                 # endpoint image: retry bila transient rate-limit (aktif salah DENIED)
                 futures.append(pool.submit(_gapi_probe_image, name, cat, url))
             else:
-                futures.append(pool.submit(_gapi_probe, name, cat, method, url, body))
+                futures.append(pool.submit(_gapi_probe, name, cat, method, url, body, headers))
         scopes = [f.result() for f in futures]
 
     active_count = sum(1 for s in scopes if s.get("vulnerable"))
