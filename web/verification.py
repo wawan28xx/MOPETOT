@@ -210,6 +210,11 @@ _GAPI_DENIAL_PATTERNS = [
      "Key valid tapi kuota habis / rate limited (billing abuse pernah/terjadi)"),
     ("requests from this", "OTHER_RESTRICTED", "DENIED — RESTRICTED", True,
      "Key valid tapi request dari klien ini ditolak (restriction aktif)"),
+    ("calling a legacy api", "NOT_ACTIVATED", "DENIED — API NONAKTIF (legacy)", True,
+     "Key valid; API legacy tidak di-enable di project (migrasi ke API baru, Places API dsb.)"),
+    ("referer restrictions cannot be used with this api", "REF_RESTRICTED",
+     "DENIED — REFERER RESTRICTED", True,
+     "Key valid, di-restrict ke HTTP referer tertentu ( Maps web service menolak)"),
 ]
 
 
@@ -220,6 +225,24 @@ def _gapi_classify(text: str):
         if pat in tl:
             return label, False, kv, detail
     return None
+
+
+def _gapi_probe_image(name: str, category: str, url: str, attempts: int = 2) -> dict:
+    """Probe endpoint image (Static Maps / Embed) dengan retry.
+
+    Google kadang balas transient 429/403 karena rate limit ketika 24 probe
+    berjalan paralel — scope yang sebenarnya aktif bisa salah terbaca DENIED.
+    Retry sekali (jeda 1.2s) bila attempt pertama bukan image-render sukses.
+    """
+    import time as _time
+    out = None
+    for i in range(attempts):
+        out = _gapi_probe(name, category, "GET", url)
+        if out.get("vulnerable"):
+            return out
+        if i < attempts - 1:
+            _time.sleep(1.2)
+    return out
 
 
 def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> dict:
@@ -385,8 +408,13 @@ def check_google_api_key(key_str: str) -> Dict[str, Any]:
     # eksekusi paralel (read-only, 1 request per scope)
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(_gapi_probe, name, cat, method, url, body)
-                   for (name, cat, method, url, body) in probes]
+        futures = []
+        for (name, cat, method, url, body) in probes:
+            if "staticmap" in url or "/maps/embed/" in url:
+                # endpoint image: retry bila transient rate-limit (aktif salah DENIED)
+                futures.append(pool.submit(_gapi_probe_image, name, cat, url))
+            else:
+                futures.append(pool.submit(_gapi_probe, name, cat, method, url, body))
         scopes = [f.result() for f in futures]
 
     active_count = sum(1 for s in scopes if s.get("vulnerable"))
