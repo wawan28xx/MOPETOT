@@ -175,14 +175,64 @@ def check_firebase_crud(url_str: str) -> Dict[str, Any]:
     }
 
 
-def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> dict:
-    """Satu probe API Google + klasifikasi hasil berbasis pesan error bawaan Google.
+_GAPI_DENIAL_PATTERNS = [
+    ("api key not valid", "INVALID_KEY", "DENIED — INVALID KEY", False,
+     "API key tidak valid / sudah dihapus"),
+    ("invalid api key", "INVALID_KEY", "DENIED — INVALID KEY", False,
+     "API key tidak valid / sudah dihapus"),
+    ("api key is invalid", "INVALID_KEY", "DENIED — INVALID KEY", False,
+     "API key tidak valid / sudah dihapus"),
+    ("api keys are not supported by this api", "OAUTH_ONLY", "API WAJIB OAUTH (KEY TAK TERUJI)", None,
+     "API ini menolak API key (hanya OAuth) — tidak membuktikan validitas key"),
+    ("this ip, site or mobile application is not authorized to use this api key",
+     "IP_RESTRICTED", "DENIED — IP/REFERER RESTRICTED", True,
+     "Key valid, di-restrict ke IP/referer tertentu (attacker butuh IP/referrer yang cocok)"),
+    ("this api key is not authorized to use this service or api",
+     "API_RESTRICTED", "DENIED — API RESTRICTION", True,
+     "Key valid, API ini tidak ada di allowlist API restriction key"),
+    ("not activated on your api project", "NOT_ACTIVATED", "DENIED — API NONAKTIF", True,
+     "Key valid; API tidak di-activate di project GCP"),
+    ("not activated on the project", "NOT_ACTIVATED", "DENIED — API NONAKTIF", True,
+     "Key valid; API tidak di-activate di project GCP"),
+    ("has not been used in project", "NOT_ACTIVATED", "DENIED — API NONAKTIF", True,
+     "Key valid; API belum pernah dipakai / disabled di project GCP"),
+    ("it is disabled", "NOT_ACTIVATED", "DENIED — API NONAKTIF", True,
+     "Key valid; API disabled di project GCP — aktifkan via console untuk jadi attack surface"),
+    ("client application", "CLIENT_RESTRICTED", "DENIED — CLIENT/PACKAGE RESTRICTED", True,
+     "Key valid, di-restrict ke package/bundle ID aplikasi tertentu (khas mobile key)"),
+    ("bundle id", "CLIENT_RESTRICTED", "DENIED — CLIENT/PACKAGE RESTRICTED", True,
+     "Key valid, di-restrict ke package/bundle ID aplikasi tertentu (khas mobile key)"),
+    ("referernotallowed", "REF_RESTRICTED", "DENIED — REFERER RESTRICTED", True,
+     "Key valid tapi dibatasi HTTP referer"),
+    ("quota", "QUOTA", "DENIED — KUOTA HABIS", True,
+     "Key valid tapi kuota habis / rate limited (billing abuse pernah/terjadi)"),
+    ("rate limit", "QUOTA", "DENIED — KUOTA HABIS", True,
+     "Key valid tapi kuota habis / rate limited (billing abuse pernah/terjadi)"),
+    ("requests from this", "OTHER_RESTRICTED", "DENIED — RESTRICTED", True,
+     "Key valid tapi request dari klien ini ditolak (restriction aktif)"),
+]
 
-    Pesan denial Google informative — tiap varian punya makna berbeda:
-      - "API key not valid"                          -> key MATI/invalid
-      - "This API is not activated on the project"  -> key VALID, API disabled
-      - "not authorized for this service" / "RefererNotAllowed" -> key VALID, restricted
-      - "API keys are not supported by this API"    -> key VALID, API wajib OAuth (intel)
+
+def _gapi_classify(text: str):
+    """Klasifikasi pesan error Google -> (status_label, vulnerable, key_valid, detail)."""
+    tl = (text or "").lower()
+    for pat, _kind, label, kv, detail in _GAPI_DENIAL_PATTERNS:
+        if pat in tl:
+            return label, False, kv, detail
+    return None
+
+
+def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> dict:
+    """Satu probe API Google + klasifikasi berbasis BODY respons (bukan HTTP code!).
+
+    Google Maps web services sering balas HTTP 200 padahal body JSON-nya
+    REQUEST_DENIED (error_message terisi) — jadi status_code 200 TIDAK berarti
+    aktif. Urutan pengecekan:
+      1. JSON `status` == OK/ZERO_RESULTS tanpa error_message -> benar-benar ACTIVE
+      2. JSON `error_message` / `status` REQUEST_DENIED -> classify pesannya
+      3. JSON `error` (Cloud API style) -> classify message-nya
+      4. Non-JSON: content-type image + 200 -> ACTIVE (Static Maps render)
+         sisanya -> classify teks mentah (keyword denial)
     """
     import requests as _rq
     out = {"api": name, "category": category, "url": url, "method": method,
@@ -192,69 +242,80 @@ def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> d
             r = _rq.post(url, json=body, headers=HEADERS, timeout=6.0, verify=False)
         else:
             r = _rq.get(url, headers=HEADERS, timeout=6.0, verify=False)
-        raw = ""
+
+        data = None
         try:
             data = r.json()
-            raw = r.text
         except Exception:
             data = None
-            raw = r.text or ""
+        raw = (r.text or "")[:2000]
+        ctype = (r.headers.get("content-type") or "").lower()
 
-        # 1) respon sukses / API aktif
-        if r.status_code == 200:
-            if data is not None and isinstance(data, dict) and data.get("status") in ("OK", "ZERO_RESULTS"):
-                out.update(status="ACTIVE / ALLOWED", vulnerable=True,
-                           detail="Status OK - endpoint aktif & key diterima")
-                out["key_valid"] = True
+        # --- 1) JSON Maps-style: status + error_message itu ground truth ---
+        if isinstance(data, dict):
+            st = data.get("status")
+            err_msg = str(data.get("error_message") or data.get("errorMessage") or "")
+            # Cloud API error style: {"error": {"code":..,"message":..,"errors":[..]}}
+            cloud_err = data.get("error")
+            cloud_msg = ""
+            if isinstance(cloud_err, dict):
+                cloud_msg = str(cloud_err.get("message") or "")
+                for e in (cloud_err.get("errors") or [])[:3]:
+                    cloud_msg += " " + str(e.get("message") or "")
+                    if e.get("reason"):
+                        cloud_msg += " " + str(e.get("reason"))
+
+            if st in ("OK", "ZERO_RESULTS") and not err_msg:
+                out.update(status="ACTIVE / ALLOWED", vulnerable=True, key_valid=True,
+                           detail=f"Status {st} - endpoint aktif & key diterima")
                 return out
-            if data is None:
-                # HTML/image response (Static Maps, Embed API) - 200 = aktif
-                out.update(status="ACTIVE / ALLOWED", vulnerable=True,
-                           detail="HTTP 200 - resource berhasil dirender (billing/kuota aktif)")
-                out["key_valid"] = True
+            if err_msg:
+                # HTTP 200 + error_message = DENIED di dalam body
+                res = _gapi_classify(err_msg) or (f"HTTP {r.status_code}", False, None,
+                                                  err_msg[:140])
+                out.update(status=res[0], vulnerable=res[1], key_valid=res[2], detail=res[3])
                 return out
-            out.update(status="ACTIVE / ALLOWED", vulnerable=True,
-                       detail="HTTP 200 - endpoint merespons data sukses")
-            out["key_valid"] = True
+            if st and st not in ("OK", "ZERO_RESULTS", None):
+                # status REQUEST_DENIED / OVER_QUERY_LIMIT / dst (error_message bisa kosong)
+                res = _gapi_classify(err_msg + " " + str(st) + " " + raw)
+                if res:
+                    out.update(status=res[0], vulnerable=res[1], key_valid=res[2], detail=res[3])
+                else:
+                    out.update(status=f"DENIED — {st}", vulnerable=False, key_valid=None,
+                               detail=f"Maps status: {st}" + (f" | {str(data)[:100]}" if not err_msg else ""))
+                return out
+            if cloud_msg:
+                res = _gapi_classify(cloud_msg) or (f"HTTP {r.status_code}", False, None,
+                                                    cloud_msg[:140])
+                out.update(status=res[0], vulnerable=res[1], key_valid=res[2], detail=res[3])
+                return out
+            # 200 JSON tanpa status/error -> sukses generik (mis. Gemini models list)
+            if r.status_code == 200 and "models" in data:
+                out.update(status="ACTIVE / ALLOWED", vulnerable=True, key_valid=True,
+                           detail="HTTP 200 - daftar model diterima (Gemini API aktif)")
+                return out
+            if r.status_code == 200:
+                out.update(status="ACTIVE / ALLOWED", vulnerable=True, key_valid=True,
+                           detail="HTTP 200 - endpoint merespons data sukses")
+                return out
+            out.update(status=f"HTTP {r.status_code}", key_valid=None, detail=raw[:120])
             return out
 
-        # 2) klasifikasi pesan error Google
-        text = (str(data) if data is not None else raw) + " " + raw
-        tl = text.lower()
-        if "api key not valid" in tl or "api_key_invalid" in tl or "invalid api key" in tl:
-            out.update(status="DENIED — INVALID KEY", key_valid=False,
-                       detail="API key tidak valid / sudah dihapus")
-        elif "api keys are not supported by this api" in tl:
-            out.update(status="VALID KEY — API wajib OAuth", key_valid=True,
-                       detail="Key dikenali valid; API ini menolak API key (hanya OAuth) — intel: key hidup")
-        elif "not activated on the project" in tl or "api target is not enabled" in tl \
-                or "has not been used" in tl or "is disabled" in tl:
-            out.update(status="DENIED — API NONAKTIF", key_valid=True,
-                       detail="Key valid; API tidak di-activate di project GCP (attacker cukup minta owner mengaktifkan?)")
-        elif ("client application" in tl and "blocked" in tl) or ("bundle id" in tl) \
-                or ("requests from this" in tl and "blocked" in tl):
-            out.update(status="DENIED — CLIENT/PACKAGE RESTRICTED", key_valid=True,
-                       detail="Key valid, di-restrict ke package/bundle ID aplikasi tertentu (khas mobile key)")
-        elif "not authorized for this service" in tl or "referernotallowed" in tl \
-                or "referer" in tl and "not authorized" in tl:
-            out.update(status="DENIED — RESTRICTED", key_valid=True,
-                       detail="Key valid tapi dibatasi (HTTP referrer / IP / API restriction)")
-        elif "quota" in tl or "ratelimit" in tl or "rate limit" in tl or "dailylimitexceeded" in tl:
-            out.update(status="DENIED — KUOTA HABIS", key_valid=True,
-                       detail="Key valid tapi kuota habis / rate limited (billing abuse pernah/terjadi)")
-        elif "package" in tl or "certificate" in tl or "restricted key" in tl:
-            out.update(status="DENIED — PACKAGE RESTRICTED", key_valid=True,
-                       detail="Key valid, restricted ke package Android tertentu (mobile key - khas)")
+        # --- 2) Non-JSON: image = Static Maps render sukses ---
+        if ctype.startswith("image") and r.status_code == 200:
+            out.update(status="ACTIVE / ALLOWED", vulnerable=True, key_valid=True,
+                       detail="Gambar berhasil dirender (billing/kuota aktif)")
+            return out
+
+        # --- 3) teks/HTML/plain: klasifikasi keyword denial di body ---
+        res = _gapi_classify(raw)
+        if res:
+            out.update(status=res[0], vulnerable=res[1], key_valid=res[2], detail=res[3])
+        elif r.status_code == 200 and "html" not in ctype:
+            out.update(status="ACTIVE / ALLOWED", vulnerable=True, key_valid=True,
+                       detail="HTTP 200 - resource sukses")
         else:
-            msg = ""
-            if isinstance(data, dict):
-                err = data.get("error") or {}
-                if isinstance(err, dict):
-                    msg = str(err.get("message") or "")[:160]
-            if not msg and isinstance(data, dict) and data.get("error_message"):
-                msg = str(data.get("error_message"))[:160]
-            out.update(status=f"HTTP {r.status_code}", key_valid=None,
-                       detail=(msg or raw[:120] or f"HTTP {r.status_code}"))
+            out.update(status=f"HTTP {r.status_code}", key_valid=None, detail=raw[:140])
     except Exception as e:
         out.update(status="Error", detail=str(e))
     return out
