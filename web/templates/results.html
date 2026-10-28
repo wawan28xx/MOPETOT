@@ -1592,7 +1592,7 @@ function loadLiveVerifier() {
     html += '</div></div>';
 
     // 2. Google Maps & Cloud API Key Suite Checker
-    html += '<div class="section-block"><div class="section-title-static"><span>🔑 Google Maps &amp; Cloud API Key Suite Checker (10 API Scopes)</span> <span class="section-count">' + googleKeys.length + '</span></div>';
+    html += '<div class="section-block"><div class="section-title-static"><span>🔑 Google Maps &amp; Cloud API Key Suite Checker (24 API Scopes)</span> <span class="section-count">' + googleKeys.length + '</span></div>';
     html += '<div class="section-content" style="padding:0; overflow-x:auto;">';
     if (googleKeys.length > 0) {
         html += '<table class="secrets-table"><thead><tr><th>API Key Match</th><th style="width:180px;">Aksi Check</th><th>Active Scopes &amp; Exploitability (Klik untuk Detail)</th></tr></thead><tbody>';
@@ -3964,8 +3964,12 @@ function verifyGoogleKey(key, rowId) {
             badgeHtml = '<span class="res-badge res-open-ro res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">⚠️ HIGH: ' + data.active_scopes_count + ' / ' + data.total_tested + ' SCOPES ALLOWED</span>';
             vClass = 'sev-high'; vLabel = 'HIGH PARTIALLY ALLOWED';
         } else {
-            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 SECURE: ALL 10 SCOPES RESTRICTED</span>';
+            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">🔒 SECURE: ALL ' + (data.total_tested || 24) + ' SCOPES RESTRICTED</span>';
             vClass = 'sev-low'; vLabel = 'RESTRICTED / SAFE';
+        }
+        if (data.verdict === 'DEAD_KEY') {
+            badgeHtml = '<span class="res-badge res-secure res-clickable" onclick="showVerifyPopup(\'' + rowId + '\')">ℹ️ KEY INVALID / DIHAPUS — 0/' + (data.total_tested || 24) + ' scope aktif</span>';
+            vLabel = 'DEAD KEY';
         }
 
         let scopesHtml = '<div style="margin-top:8px; max-height:140px; overflow-y:auto; font-family:var(--font-mono); font-size:11px; background:var(--bg-card); padding:8px; border-radius:4px; border:1px solid var(--border);">';
@@ -3986,7 +3990,7 @@ function verifyGoogleKey(key, rowId) {
 
         modalHtml += '<div style="margin-bottom:16px; background:var(--bg-secondary); padding:12px 16px; border-radius:6px;"><span style="color:var(--text-muted); font-size:11px;">Tested Google API Key (39 chars)</span><br><code style="color:#fbbf24; font-size:14px; font-weight:700;">' + escHtml(data.full_key || key) + '</code></div>';
 
-        modalHtml += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><strong style="color:var(--text-primary); font-size:13px;">Rincian Pengujian 10 Endpoint Google Maps &amp; Cloud API:</strong><span style="font-size:12px; color:var(--text-secondary);">' + (data.active_scopes_count || 0) + ' / ' + (data.total_tested || 10) + ' Active</span></div>';
+        modalHtml += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><strong style="color:var(--text-primary); font-size:13px;">Rincian Pengujian ' + (data.total_tested || 24) + ' Endpoint Google Maps &amp; Cloud API:</strong><span style="font-size:12px; color:var(--text-secondary);">' + (data.active_scopes_count || 0) + ' / ' + (data.total_tested || 10) + ' Active</span></div>';
 
         modalHtml += '<div style="display:flex; flex-direction:column; gap:8px;">';
         (data.scopes || []).forEach(function(sc) {

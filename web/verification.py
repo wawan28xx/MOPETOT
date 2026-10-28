@@ -175,94 +175,169 @@ def check_firebase_crud(url_str: str) -> Dict[str, Any]:
     }
 
 
+def _gapi_probe(name: str, category: str, method: str, url: str, body=None) -> dict:
+    """Satu probe API Google + klasifikasi hasil berbasis pesan error bawaan Google.
+
+    Pesan denial Google informative — tiap varian punya makna berbeda:
+      - "API key not valid"                          -> key MATI/invalid
+      - "This API is not activated on the project"  -> key VALID, API disabled
+      - "not authorized for this service" / "RefererNotAllowed" -> key VALID, restricted
+      - "API keys are not supported by this API"    -> key VALID, API wajib OAuth (intel)
+    """
+    import requests as _rq
+    out = {"api": name, "category": category, "url": url, "method": method,
+           "status": "Error", "vulnerable": False, "key_valid": None, "detail": ""}
+    try:
+        if method == "POST":
+            r = _rq.post(url, json=body, headers=HEADERS, timeout=6.0, verify=False)
+        else:
+            r = _rq.get(url, headers=HEADERS, timeout=6.0, verify=False)
+        raw = ""
+        try:
+            data = r.json()
+            raw = r.text
+        except Exception:
+            data = None
+            raw = r.text or ""
+
+        # 1) respon sukses / API aktif
+        if r.status_code == 200:
+            if data is not None and isinstance(data, dict) and data.get("status") in ("OK", "ZERO_RESULTS"):
+                out.update(status="ACTIVE / ALLOWED", vulnerable=True,
+                           detail="Status OK - endpoint aktif & key diterima")
+                out["key_valid"] = True
+                return out
+            if data is None:
+                # HTML/image response (Static Maps, Embed API) - 200 = aktif
+                out.update(status="ACTIVE / ALLOWED", vulnerable=True,
+                           detail="HTTP 200 - resource berhasil dirender (billing/kuota aktif)")
+                out["key_valid"] = True
+                return out
+            out.update(status="ACTIVE / ALLOWED", vulnerable=True,
+                       detail="HTTP 200 - endpoint merespons data sukses")
+            out["key_valid"] = True
+            return out
+
+        # 2) klasifikasi pesan error Google
+        text = (str(data) if data is not None else raw) + " " + raw
+        tl = text.lower()
+        if "api key not valid" in tl or "api_key_invalid" in tl or "invalid api key" in tl:
+            out.update(status="DENIED — INVALID KEY", key_valid=False,
+                       detail="API key tidak valid / sudah dihapus")
+        elif "api keys are not supported by this api" in tl:
+            out.update(status="VALID KEY — API wajib OAuth", key_valid=True,
+                       detail="Key dikenali valid; API ini menolak API key (hanya OAuth) — intel: key hidup")
+        elif "not activated on the project" in tl or "api target is not enabled" in tl \
+                or "has not been used" in tl or "is disabled" in tl:
+            out.update(status="DENIED — API NONAKTIF", key_valid=True,
+                       detail="Key valid; API tidak di-activate di project GCP (attacker cukup minta owner mengaktifkan?)")
+        elif ("client application" in tl and "blocked" in tl) or ("bundle id" in tl) \
+                or ("requests from this" in tl and "blocked" in tl):
+            out.update(status="DENIED — CLIENT/PACKAGE RESTRICTED", key_valid=True,
+                       detail="Key valid, di-restrict ke package/bundle ID aplikasi tertentu (khas mobile key)")
+        elif "not authorized for this service" in tl or "referernotallowed" in tl \
+                or "referer" in tl and "not authorized" in tl:
+            out.update(status="DENIED — RESTRICTED", key_valid=True,
+                       detail="Key valid tapi dibatasi (HTTP referrer / IP / API restriction)")
+        elif "quota" in tl or "ratelimit" in tl or "rate limit" in tl or "dailylimitexceeded" in tl:
+            out.update(status="DENIED — KUOTA HABIS", key_valid=True,
+                       detail="Key valid tapi kuota habis / rate limited (billing abuse pernah/terjadi)")
+        elif "package" in tl or "certificate" in tl or "restricted key" in tl:
+            out.update(status="DENIED — PACKAGE RESTRICTED", key_valid=True,
+                       detail="Key valid, restricted ke package Android tertentu (mobile key - khas)")
+        else:
+            msg = ""
+            if isinstance(data, dict):
+                err = data.get("error") or {}
+                if isinstance(err, dict):
+                    msg = str(err.get("message") or "")[:160]
+            if not msg and isinstance(data, dict) and data.get("error_message"):
+                msg = str(data.get("error_message"))[:160]
+            out.update(status=f"HTTP {r.status_code}", key_valid=None,
+                       detail=(msg or raw[:120] or f"HTTP {r.status_code}"))
+    except Exception as e:
+        out.update(status="Error", detail=str(e))
+    return out
+
+
 def check_google_api_key(key_str: str) -> Dict[str, Any]:
-    """Test lengkap seluruh Google Maps & Cloud API endpoints (10+ API endpoints)."""
+    """Suite tester Google API key: 24 scope dalam 4 kategori (paralel).
+
+    Kategori:
+      1. Maps Core      — 10 endpoint klasik (Geocoding, Directions, Places, dst.)
+      2. Maps Extended  — Street View, Nearby Search, Roads, Geolocation, Embed, Address Validation
+      3. Cloud AI/Data   — YouTube, Gemini (Generative Language), Translation, Vision, TTS, NL
+      4. Key Intel       — Drive/Calendar (API wajib OAuth): pesan error-nya membuktikan key valid/mati
+
+    Seluruh probe read-only & ringan (1 request per scope). Eksekusi paralel
+    sehingga total waktu ~6-10 detik berapa pun jumlah scope-nya.
+    """
     m = re.search(r'AIza[0-9A-Za-z_-]{35}', key_str)
     key = m.group(0) if m else key_str.strip()
 
-    tests = {
-        "Geocoding API": f"https://maps.googleapis.com/maps/api/geocode/json?address=Jakarta&key={key}",
-        "Reverse Geocoding": f"https://maps.googleapis.com/maps/api/geocode/json?latlng=-6.200000,106.816666&key={key}",
-        "Directions API": f"https://maps.googleapis.com/maps/api/directions/json?origin=Jakarta&destination=Bandung&key={key}",
-        "Distance Matrix API": f"https://maps.googleapis.com/maps/api/distancematrix/json?origins=Jakarta&destinations=Bandung&key={key}",
-        "Places Text Search API": f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=restaurant+in+Jakarta&key={key}",
-        "Place Details API": f"https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJnUvjRenzaS4R4p8G5Ssk6kE&key={key}",
-        "Place Autocomplete API": f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Jakarta&key={key}",
-        "Time Zone API": f"https://maps.googleapis.com/maps/api/timezone/json?location=-6.200000,106.816666&timestamp=1458000000&key={key}",
-        "Elevation API": f"https://maps.googleapis.com/maps/api/elevation/json?locations=-6.200000,106.816666&key={key}",
-        "Static Maps API": f"https://maps.googleapis.com/maps/api/staticmap?center=Surabaya&zoom=10&size=400x400&key={key}",
-    }
+    probes = []
 
-    scopes = []
+    def g(name, url, category="Maps Core"):
+        probes.append((name, category, "GET", url, None))
 
-    for name, test_url in tests.items():
-        try:
-            r = requests.get(test_url, headers=HEADERS, timeout=5.0, verify=False)
-            if "staticmap" in test_url:
-                if r.status_code == 200:
-                    scopes.append({
-                        "api": name,
-                        "url": test_url,
-                        "status": "ACTIVE / ALLOWED",
-                        "vulnerable": True,
-                        "detail": "Gambar Static Map 400x400 berhasil di-render (Billing / Kuota aktif)"
-                    })
-                else:
-                    scopes.append({
-                        "api": name,
-                        "url": test_url,
-                        "status": f"HTTP {r.status_code}",
-                        "vulnerable": False,
-                        "detail": "Status respon bukan 200 OK"
-                    })
-            else:
-                try:
-                    data = r.json()
-                    st = data.get("status")
-                    if st in ("OK", "ZERO_RESULTS"):
-                        scopes.append({
-                            "api": name,
-                            "url": test_url,
-                            "status": "ACTIVE / ALLOWED",
-                            "vulnerable": True,
-                            "detail": f"Status: {st} - Endpoint memberikan data sukses"
-                        })
-                    elif st == "REQUEST_DENIED":
-                        err_msg = data.get("error_message", "Request Denied")
-                        scopes.append({
-                            "api": name,
-                            "url": test_url,
-                            "status": "DENIED",
-                            "vulnerable": False,
-                            "detail": err_msg
-                        })
-                    else:
-                        scopes.append({
-                            "api": name,
-                            "url": test_url,
-                            "status": st or f"HTTP {r.status_code}",
-                            "vulnerable": False,
-                            "detail": str(data)[:80]
-                        })
-                except Exception:
-                    scopes.append({
-                        "api": name,
-                        "url": test_url,
-                        "status": f"HTTP {r.status_code}",
-                        "vulnerable": False,
-                        "detail": r.text[:80]
-                    })
-        except Exception as e:
-            scopes.append({
-                "api": name,
-                "url": test_url,
-                "status": "Error",
-                "vulnerable": False,
-                "detail": str(e)
-            })
+    def p_(name, url, body, category="Cloud AI / Data"):
+        probes.append((name, category, "POST", url, body))
+
+    # --- 1. Maps Core (10) ---
+    g("Geocoding API", f"https://maps.googleapis.com/maps/api/geocode/json?address=Jakarta&key={key}")
+    g("Reverse Geocoding", f"https://maps.googleapis.com/maps/api/geocode/json?latlng=-6.200000,106.816666&key={key}")
+    g("Directions API", f"https://maps.googleapis.com/maps/api/directions/json?origin=Jakarta&destination=Bandung&key={key}")
+    g("Distance Matrix API", f"https://maps.googleapis.com/maps/api/distancematrix/json?origins=Jakarta&destinations=Bandung&key={key}")
+    g("Places Text Search", f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=restaurant+in+Jakarta&key={key}")
+    g("Place Details", f"https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJnUvjRenzaS4R4p8G5Ssk6kE&key={key}")
+    g("Place Autocomplete", f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Jakarta&key={key}")
+    g("Time Zone API", f"https://maps.googleapis.com/maps/api/timezone/json?location=-6.200000,106.816666&timestamp=1458000000&key={key}")
+    g("Elevation API", f"https://maps.googleapis.com/maps/api/elevation/json?locations=-6.200000,106.816666&key={key}")
+    g("Static Maps API", f"https://maps.googleapis.com/maps/api/staticmap?center=Surabaya&zoom=10&size=400x400&key={key}")
+
+    # --- 2. Maps Extended (6) ---
+    g("Street View Metadata", f"https://maps.googleapis.com/maps/api/streetview/metadata?location=-6.2088,106.8456&key={key}", "Maps Extended")
+    g("Places Nearby Search", f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=-6.200000,106.816666&radius=500&key={key}", "Maps Extended")
+    g("Roads API (nearestRoads)", f"https://roads.googleapis.com/v1/nearestRoads?points=-6.200000,106.816666&key={key}", "Maps Extended")
+    p_("Geolocation API", f"https://www.googleapis.com/geolocation/v1/geolocate?key={key}", {}, "Maps Extended")
+    g("Maps Embed API", f"https://www.google.com/maps/embed/v1/view?key={key}&center=-6.200000,106.816666&zoom=10&maptype=roadmap", "Maps Extended")
+    p_("Address Validation API", f"https://addressvalidation.googleapis.com/v1:validateAddress?key={key}",
+       {"address": {"regionCode": "ID"}}, "Maps Extended")
+
+    # --- 3. Cloud AI / Data (6) — vektor billing abuse paling mahal ---
+    g("YouTube Data API v3", f"https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&maxResults=1&key={key}", "Cloud AI / Data")
+    g("Generative Language (Gemini)", f"https://generativelanguage.googleapis.com/v1beta/models?key={key}", "Cloud AI / Data")
+    p_("Cloud Translation API", f"https://translation.googleapis.com/language/translate/v2?key={key}",
+       {"q": "hello", "target": "id", "format": "text"})
+    p_("Cloud Vision API", f"https://vision.googleapis.com/v1/images:annotate?key={key}",
+       {"requests": [{"image": {"source": {"imageUri": "https://www.gstatic.com/webp/gallery3/1.jpg"}},
+                      "features": [{"type": "LABEL_DETECTION", "maxResults": 1}]}]})
+    p_("Text-to-Speech API", f"https://texttospeech.googleapis.com/v1/text:synthesize?key={key}",
+       {"input": {"text": "hi"}, "voice": {"languageCode": "en-US"}, "audioConfig": {"audioEncoding": "MP3"}})
+    p_("Natural Language API", f"https://language.googleapis.com/v1/documents:analyzeSentiment?key={key}",
+       {"document": {"content": "hello", "type": "PLAIN_TEXT"}})
+
+    # --- 4. Key Intel (2) — API wajib OAuth, error-nya membuktikan key hidup/mati ---
+    g("Drive API (key intel)", f"https://www.googleapis.com/drive/v3/about?fields=user&key={key}", "Key Intel (OAuth-only)")
+    g("Calendar API (key intel)", f"https://www.googleapis.com/calendar/v3/users/me/calendarList?key={key}", "Key Intel (OAuth-only)")
+
+    # eksekusi paralel (read-only, 1 request per scope)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(_gapi_probe, name, cat, method, url, body)
+                   for (name, cat, method, url, body) in probes]
+        scopes = [f.result() for f in futures]
 
     active_count = sum(1 for s in scopes if s.get("vulnerable"))
     is_vulnerable = active_count > 0
+    # validitas key = bukti terkuat dari semua respons (False lebih kuat dari None)
+    key_validity = None
+    for s in scopes:
+        if s.get("key_valid") is False:
+            key_validity = False
+            break
+        if s.get("key_valid") is True:
+            key_validity = True
 
     if active_count >= 5:
         verdict = "CRITICAL_UNRESTRICTED"
@@ -270,15 +345,22 @@ def check_google_api_key(key_str: str) -> Dict[str, Any]:
     elif active_count > 0:
         verdict = "HIGH_PARTIAL_ALLOWED"
         summary = f"HIGH: {active_count} dari {len(scopes)} Google API aktif tanpa Referer/IP restriction."
+    elif key_validity is False:
+        verdict = "DEAD_KEY"
+        summary = f"INFO: Key tidak valid / sudah dihapus (0/{len(scopes)} scope aktif, probe mengindikasikan invalid key)."
     else:
         verdict = "SECURE_RESTRICTED"
-        summary = "SECURE: Kunci Google dibatasi (Restricted / API Scope dinonaktifkan)."
+        extra = ""
+        if key_validity is True:
+            extra = " (key valid tapi semua scope dibatasi/nonaktif)"
+        summary = f"SECURE: Kunci Google dibatasi — 0/{len(scopes)} scope aktif{extra}."
 
     return {
         "key": key[:10] + "..." + key[-4:] if len(key) > 14 else key,
         "full_key": key,
         "active_scopes_count": active_count,
         "total_tested": len(scopes),
+        "key_valid": key_validity,
         "is_vulnerable": is_vulnerable,
         "verdict": verdict,
         "summary": summary,
