@@ -13,7 +13,7 @@ except Exception as e:
 
 # 2. Test Google API on running server
 try:
-    r = requests.post("http://localhost:8089/api/scan/21/verify/google-api", json={"key": "AIzaSyD00000000000000000000000000000000"}, timeout=5)
+    r = requests.post("http://localhost:8089/api/scan/21/verify/google-api", json={"key": "AIzaSyD" + "0" * 32}, timeout=5)
     print("\nGoogle API verify status:", r.status_code)
     print("Response:", r.text)
 except Exception as e:

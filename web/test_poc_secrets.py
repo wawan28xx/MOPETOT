@@ -22,7 +22,7 @@ def sec(rid, m, sev="high", fp="res/values/strings.xml", ln=1):
 
 # --- dispatcher: klasifikasi tipe ---
 K = PoCEngine._secret_kind
-assert K("gcp_api_key", "AIzaSyB00000000000000000000000000000000") == "google_api_key"
+assert K("gcp_api_key", "AIzaSyB" + "0" * 32) == "google_api_key"
 assert K("AWS_KEY", "AKIAIOSFODNN7EXAMPLE") == "aws"
 assert K("x", "sk_live_abc123") == "stripe"
 assert K("x", "https://hooks.slack.com/services/T1/B2/xxx") == "slack_webhook"
@@ -40,10 +40,10 @@ print("[2] _secret_kind dispatcher OK")
 
 
 # --- PoC google api key ---
-p = eng.generate_secret_poc(sec("gcp_api_key", "AIzaSyB00000000000000000000000000000000"))
+p = eng.generate_secret_poc(sec("gcp_api_key", "AIzaSyB" + "0" * 32))
 assert p and p["poc_type"] == "google_api_key" and p["mode"] == "PASIF"
 assert "generativelanguage.googleapis.com" in p["code"]
-assert "AIzaSyB00000000000000000000000000000000" in p["code"]
+assert ("AIzaSyB" + "0" * 32) in p["code"]
 assert p["language"] == "python"
 print("[3] google_api_key PoC OK")
 

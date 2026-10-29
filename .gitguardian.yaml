@@ -1,0 +1,9 @@
+# Secret-scanning whitelist: file berikut MEMANG berisi pattern/fixture
+# sintetis (bukan secret riil):
+# - rules/secrets.json : kumpulan REGEX detektor MOPETOT (pecahan PEM dsb.)
+# - web/test_poc_secrets.py, web/test_running_server.py : fixture test dirakit
+#   runtime; format valid dibutuhkan untuk menguji classifier.
+paths-ignore:
+  - "rules/secrets.json"
+  - "web/test_poc_secrets.py"
+  - "web/test_running_server.py"
